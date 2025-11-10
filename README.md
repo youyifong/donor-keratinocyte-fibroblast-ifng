@@ -5,5 +5,5 @@
 
 
 ```{shell}
-Rscript -e "rmarkdown::render('analysis.Rmd', output_file='analysis_$(date +%Y%m%d).pdf')"
+Rscript -e "rmarkdown::render('analysis.Rmd', output_file='reports/analysis_$(date +%Y%m%d).pdf')"
 ```
