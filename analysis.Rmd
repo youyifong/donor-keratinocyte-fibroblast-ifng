@@ -755,9 +755,6 @@ kable(tab, align="c")%>%
 
 Data is not log10 transformed.
 
-```{r cellprofiler data, echo=F, message=F, results='asis'}
-```
-
 
 ```{r cellprofiler data, echo=F, message=F, results='asis'}
 dat1=readxl::read_xlsx("data/2025-11-6_pSTAT1_NuclearFlr_Data.xlsx",
