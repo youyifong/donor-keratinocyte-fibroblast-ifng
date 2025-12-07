@@ -1,3 +1,6 @@
 *.xlsx
 docs/
 data/archive/
+analysis.log
+analysis.pdf
+analysis_20251206.log

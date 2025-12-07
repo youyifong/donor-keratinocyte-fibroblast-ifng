@@ -24,6 +24,42 @@ doses=c("0", "0.1", "1", "10", "100"); names(doses)=doses
 tissues=c("Keratinocytes", "Fibroblasts"); names(tissues)=tissues
 times=c("Untreated", "4HPT", "24HPT"); names(times)=times
 times2=c("30M", "60M", "120M", "240M"); names(times2)=times2
+
+
+f.paired.t = function(dat, outcome, cond, print=F) {
+
+  # take average of replicates for each donor and trt
+  tmp = dat %>%
+    group_by(donor, !!sym(cond)) %>%
+    summarize(fc = mean(.data[[outcome]], na.rm = TRUE), .groups = "drop")
+
+  # reshape to wide format with one column per trt
+  tmp1 = reshape(as.data.frame(tmp), idvar = "donor", timevar = cond,
+                 direction = "wide")
+
+  # extract the two treatment groups inside the cond column
+  groups <- unique(dat[[cond]])
+  if (length(groups) != 2) {
+    stop("The cond column must contain exactly 2 treatment levels.")
+  }
+  # rename for clarity
+  g1 <- groups[1]
+  g2 <- groups[2]
+
+  # print(tmp1)
+  
+  # run paired t-test
+  test = t.test(tmp1[["fc."%.%g1]], tmp1[["fc."%.%g2]], paired = TRUE)
+
+  if (print) {
+    myboxplot(list(tmp1[["fc."%.%g1]], tmp1[["fc."%.%g2]]))
+    print(tmp1)
+    print(test)
+  }
+  
+  test$p.value
+}
+
 ```
 
 ## Background 
@@ -34,7 +70,7 @@ This project focuses on cytokines and their role in controlling viral replicatio
 
 Fold changes are computed from actin.
 
-Linear mixed models are used to analyze the data. The models account for the random effects of donor variability.
+When data are paired, paired t tests are used. When data are not paired, both unpaired t tests and linear mixed models (lmm) are used to analyze the data. t tests first average the outcome in the replicates, lmm uses all data. Lmm may be more efficient, but when there are warnings about singular values, the validyt of their results is in doubt. 
 
 \newpage
 ## Fig 5A
@@ -42,7 +78,7 @@ Linear mixed models are used to analyze the data. The models account for the ran
 Data is log10 transformed.
 
 
-```{r panel A data, echo=F, message=F}
+```{r panel A data, echo=F, message=T}
 
 dat=read.csv("data/Panel5A.csv")
 
@@ -90,14 +126,22 @@ dat=dat.2
 
 For Keratinocyte, there are 10 donors; for Fibroblast, there are 4 donors. 
 
-```{r, echo=F, message=F}
+```{r 5a1, echo=F, message=T}
 mysapply(cytokines, function (c) {
-  fit.1 = lmer(fold_change ~ trt + (1|donor), data=subset(dat, cytokine==c & tissue=="keratinocyte"))
-  fit.2 = lmer(fold_change ~ trt + (1|donor), data=subset(dat, cytokine==c & tissue=="fibroblast"))
-  tab=getFormattedSummary(list(Keratinocyte=fit.1, Fibroblast=fit.2), robust=F, p.digits=3, exp10=T, trunc.large.est = F)
-  tab[2,]
+  # # lmm
+  # fit.1 = lmer(fold_change ~ trt + (1|donor), data=subset(dat, cytokine==c & tissue=="keratinocyte" & !is.na(fold_change)))
+  # fit.2 = lmer(fold_change ~ trt + (1|donor), data=subset(dat, cytokine==c & tissue=="fibroblast" & !is.na(fold_change)))
+  # tab=getFormattedSummary(list(Keratinocyte=fit.1, Fibroblast=fit.2), robust=F, p.digits=3, exp10=T, trunc.large.est = F)
+  # tab[2,]
+  
+  # paired t test
+  out = c(
+    Keratinocyte=f.paired.t(subset(dat, cytokine==c & tissue=="keratinocyte" & !is.na(fold_change)), outcome="fold_change", cond="trt"),
+    Fibroblast  =f.paired.t(subset(dat, cytokine==c & tissue=="fibroblast"   & !is.na(fold_change)), outcome="fold_change", cond="trt"))
+  formatPvalues(out)
 }) -> tab
-kable(tab, align='l') %>%
+kable(tab, align='l',
+      caption="Paired t test p values.") %>%
   kable_styling(latex_options = "hold_position")%>% 
   row_spec(0, bold = TRUE, align = "c")%>%
   row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[4pt]")
@@ -108,23 +152,29 @@ Treated versus untreated is highly significant except for CCL5 on fibroblasts.
 
 **Question**: Is there a statistically significant difference between treated keratinocytes and treated fibroblasts
 
-```{r, echo=F, message=F}
+```{r 5a2, echo=F, message=T}
 mysapply(cytokines, function (c) {
-  fit.1 = lmer(fold_change ~ tissue + (1|donor), data=subset(dat, cytokine==c & trt=="treated"))
-  fit.2 = lmer(fold_change ~ tissue + (1|donor), data=subset(dat, cytokine==c & trt=="untreated"))
-  tab=getFormattedSummary(list(Treated=fit.1, Untreated=fit.2), robust=F, p.digits=3, exp10=T, trunc.large.est = F)
-  tab[2,]
+  # # lmm
+  # fit.1 = lmer(fold_change ~ tissue + (1|donor), data=subset(dat, cytokine==c & trt=="treated"))
+  # fit.2 = lmer(fold_change ~ tissue + (1|donor), data=subset(dat, cytokine==c & trt=="untreated"))
+  # tab=getFormattedSummary(list(Treated=fit.1, Untreated=fit.2), robust=F, p.digits=3, exp10=T, trunc.large.est = F)
+  # tab[2,]
+  
+  # paired t test
+  out = c(
+    treated  =f.paired.t(subset(dat, cytokine==c & trt=="treated"   & !is.na(fold_change)), "fold_change", "tissue"),
+    untreated=f.paired.t(subset(dat, cytokine==c & trt=="untreated" & !is.na(fold_change)), "fold_change", "tissue")
+  )
+  formatPvalues(out)
+  
 }) -> tab
-kable(tab, align='l') %>%
+kable(tab, align='l', 
+      caption = "Paired t test p values.") %>%
   kable_styling(latex_options = "hold_position")%>% 
   row_spec(0, bold = TRUE, align = "c")%>%
   row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[4pt]")
 ```
 Treated keratinocytes versus treated fibroblasts is highly significant except for CCL5. Untreated keratinocytes versus untreated fibroblasts is not significant for any cytokine.
-
-
-
-
 
 
 \newpage
@@ -133,8 +183,7 @@ Treated keratinocytes versus treated fibroblasts is highly significant except fo
 
 Data is not log10 transformed.
 
-
-```{r panel B data, echo=F, message=F}
+```{r 5B data, echo=F, message=T}
 
 dat=read.csv("data/Panel5B.csv")
 
@@ -172,14 +221,21 @@ dat=dat.2
 
 **Question**: Is there a statistically significant difference between keratinocytes (orange) and fibroblasts (blue) at each dose in each cytokine of interest?
 
-```{r, echo=F, message=F}
+```{r 5b1, echo=F, message=T}
 mysapply(cytokines, function (c) {
-  fits = lapply(doses, function(d) lmer(dCt ~ tissue + (1|donor), data=subset(dat, cytokine==c & dose==d)))
-  names(fits)=doses
-  tab=getFormattedSummary(fits, robust=F, p.digits=3, exp10=F, trunc.large.est = F)
-  tab[2,]
+  # # lmm
+  # fits = lapply(doses, function(d) lmer(dCt ~ tissue + (1|donor), data=subset(dat, cytokine==c & dose==d)))
+  # names(fits)=doses
+  # tab=getFormattedSummary(fits, robust=F, p.digits=3, exp10=F, trunc.large.est = F)
+  # tab[2,]
+  
+  # paired t test
+  out=sapply(doses, function(d) f.paired.t(subset(dat, cytokine==c & dose==d & !is.na(dCt)), "dCt", "tissue"))
+  formatPvalues(out)
+
 }) -> tab
-kable(tab, align='l') %>%
+kable(tab, align='c',
+      caption = "Paired t test p values.") %>%
   kable_styling(latex_options = "hold_position") %>% 
   row_spec(0, bold = TRUE, align = "c")%>%
   column_spec(1, width = "1.1cm") %>%  
@@ -191,14 +247,23 @@ kable(tab, align='l') %>%
 
 **Question**: For each tissue, is there a statistically significant difference between each dose and the next lower dose? IE is there a difference between 0.1 and 1, 1 and 10, 10 and 100? The goal of this question is to establish what dose is the peak response
 
-```{r, echo=F, message=F}
+```{r 5b2, echo=F, message=T}
 tabs=list()
 for (j in 1:2) {
   tabs[[j]] = mysapply(cytokines, function (c) {
-    fits = lapply(seq_along(doses)[-1], function(i) lmer(dCt ~ dose + (1|donor), data=subset(dat, tissue==tissues[j] & cytokine==c & dose %in% doses[c(i-1,i)])))
-    names(fits)=paste0(doses[2:length(doses)], " vs. ", doses[2:length(doses)-1])
-    tab=getFormattedSummary(fits, robust=F, p.digits=3, exp10=F, trunc.large.est = F)
-    tab[2,]
+    # # lmm
+    # fits = lapply(seq_along(doses)[-1], function(i) lmer(dCt ~ dose + (1|donor), data=subset(dat, tissue==tissues[j] & cytokine==c & dose %in% doses[c(i-1,i)])))
+    # names(fits)=paste0(doses[2:length(doses)], " vs. ", doses[2:length(doses)-1])
+    # tab=getFormattedSummary(fits, robust=F, p.digits=3, exp10=F, trunc.large.est = F)
+    # tab[2,]
+    
+    # paired t test
+    out = sapply(seq_along(doses)[-1], function(i) {
+      tmp=subset(dat, tissue==tissues[j] & cytokine==c & dose %in% doses[c(i-1,i)])
+      f.paired.t(tmp, "dCt", "dose")
+    })
+    names(out)=paste0(doses[2:length(doses)], " vs. ", doses[2:length(doses)-1])
+    formatPvalues(out)
   }) 
 }
 # combine the two tables by interspering the rows
@@ -206,7 +271,8 @@ tab=do.call(rbind, lapply(1:nrow(tabs[[1]]), function(i) {
   rbind(tabs[[1]][i,], tabs[[2]][i,])
 }))
 rownames(tab)=c(t(outer(cytokines, tissues, paste, sep=", ")))
-kable(tab)%>%
+kable(tab, align="c",
+      caption = "Paired t test p values.") %>%
   kable_styling(latex_options = "hold_position") %>% 
   row_spec(0, bold = TRUE, align = "c")%>%
   column_spec(1, width = "2.5cm") %>%  
@@ -222,7 +288,7 @@ kable(tab)%>%
 Data is log10 transformed.
 
 
-```{r panel C data, echo=F, message=F}
+```{r 5C data, echo=F, message=T}
 
 dat=read.csv("data/Panel5C.csv")
 
@@ -261,14 +327,22 @@ dat=dat.2
 
 **Question**: Is there a statistically significant difference between keratinocytes (orange) and fibroblasts (blue) at each dose in each cytokine of interest?
 
-```{r, echo=F, message=F}
+```{r 5c1, echo=F, message=T}
 mysapply(cytokines, function (c) {
-  fits = lapply(doses, function(d) lmer(fold_change ~ tissue + (1|donor), data=subset(dat, cytokine==c & dose==d)))
-  names(fits)=doses
-  tab=getFormattedSummary(fits, robust=F, p.digits=3, exp10=T, trunc.large.est = F)
-  tab[2,]
+  # # lmm
+  # fits = lapply(doses, function(d) lmer(fold_change ~ tissue + (1|donor), data=subset(dat, cytokine==c & dose==d)))
+  # names(fits)=doses
+  # tab=getFormattedSummary(fits, robust=F, p.digits=3, exp10=T, trunc.large.est = F)
+  # tab[2,]
+  
+  # paired t test
+  out=sapply(doses, function(d) f.paired.t(subset(dat, cytokine==c & dose==d & !is.na(fold_change)), "fold_change", "tissue"))
+  formatPvalues(out)
+  
 }) -> tab
-kable(tab, align='l') %>%
+
+kable(tab, align='c',
+      caption = "Paired t test p values.") %>%
   kable_styling(latex_options = "hold_position") %>% 
   row_spec(0, bold = TRUE, align = "c")%>%
   column_spec(1, width = "1.1cm") %>%  
@@ -276,17 +350,27 @@ kable(tab, align='l') %>%
   row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
 ```
 
+\newpage
 
 **Question**: For each tissue, is there a statistically significant difference between each dose and the next lower dose? The goal of this question is to establish what dose is the peak response
 
-```{r, echo=F, message=F}
+```{r 5c2, echo=F, message=T}
 tabs=list()
 for (j in 1:2) {
   tabs[[j]] = mysapply(cytokines, function (c) {
-    fits = lapply(seq_along(doses)[-1], function(i) lmer(fold_change ~ dose + (1|donor), data=subset(dat, tissue==tissues[j] & cytokine==c & dose %in% doses[c(i-1,i)])))
-    names(fits)=paste0(doses[2:length(doses)], " vs. ", doses[2:length(doses)-1])
-    tab=getFormattedSummary(fits, robust=F, p.digits=3, exp10=T, trunc.large.est = F)
-    tab[2,]
+    # # lmm
+    # fits = lapply(seq_along(doses)[-1], function(i) lmer(fold_change ~ dose + (1|donor), data=subset(dat, tissue==tissues[j] & cytokine==c & dose %in% doses[c(i-1,i)])))
+    # names(fits)=paste0(doses[2:length(doses)], " vs. ", doses[2:length(doses)-1])
+    # tab=getFormattedSummary(fits, robust=F, p.digits=3, exp10=T, trunc.large.est = F)
+    # tab[2,]
+    
+    # paired t test
+    out = sapply(seq_along(doses)[-1], function(i) {
+      tmp=subset(dat, tissue==tissues[j] & cytokine==c & dose %in% doses[c(i-1,i)])
+      f.paired.t(tmp, "fold_change", "dose")
+    })
+    names(out)=paste0(doses[2:length(doses)], " vs. ", doses[2:length(doses)-1])
+    formatPvalues(out)
   }) 
 }
 # combine the two tables by interspering the rows
@@ -294,12 +378,14 @@ tab=do.call(rbind, lapply(1:nrow(tabs[[1]]), function(i) {
   rbind(tabs[[1]][i,], tabs[[2]][i,])
 }))
 rownames(tab)=c(t(outer(cytokines, tissues, paste, sep=", ")))
-kable(tab)%>%
+kable(tab, align='c',
+      caption = "Paired t test p values.") %>%
   kable_styling(latex_options = "hold_position") %>% 
   row_spec(0, bold = TRUE, align = "c")%>%
   column_spec(1, width = "2.5cm") %>%  
   column_spec(2:(ncol(tab)+1), width = "3cm")%>%  
   row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[5pt]")
+
 ```
 
 
@@ -310,7 +396,7 @@ kable(tab)%>%
 Data is log10 transformed.
 
 
-```{r panel D data, echo=F, message=F}
+```{r 5D data, echo=F, message=T}
 
 dat=read.csv("data/Panel5D.csv")
 
@@ -349,14 +435,21 @@ dat=dat.2
 
 **Question**: Is there a statistically significant difference between keratinocytes (orange) and fibroblasts (blue) at each time point for each cytokine individually? 
 
-```{r, echo=F, message=F}
+```{r 5D1, echo=F, message=T}
 mysapply(cytokines, function (c) {
-  fits = lapply(times, function(t) lmer(fold_change ~ tissue + (1|donor), data=subset(dat, cytokine==c & time==t)))
-  names(fits)=times
-  tab=getFormattedSummary(fits, robust=F, p.digits=3, exp10=T, trunc.large.est = F)
-  tab[2,]
+  # # lmm
+  # fits = lapply(times, function(t) lmer(fold_change ~ tissue + (1|donor), data=subset(dat, cytokine==c & time==t)))
+  # names(fits)=times
+  # tab=getFormattedSummary(fits, robust=F, p.digits=3, exp10=T, trunc.large.est = F)
+  # tab[2,]
+  
+  # paired t test
+  out=sapply(times, function(t) f.paired.t(subset(dat, cytokine==c & time==t & !is.na(fold_change)), "fold_change", "tissue"))
+  formatPvalues(out)
 }) -> tab
-kable(tab, align='l') %>%
+
+kable(tab, align='c',
+      caption = "Paired t test p values.") %>%
   kable_styling(latex_options = "hold_position") %>% 
   row_spec(0, bold = TRUE, align = "c")%>%
   column_spec(1, width = "1.1cm") %>%  
@@ -367,22 +460,37 @@ kable(tab, align='l') %>%
 
 **Question**: For fibroblasts, is there a statistically significant difference between untreated and 4HPT for each cytokine? Is there a statistically significant difference between 4HPT and 24HPT for each cytokine?
 
-```{r, echo=F, message=F}
+```{r 5D2, echo=F, message=T}
 tabs=list()
+tabs2=list()
 for (j in 1:2) {
   tabs[[j]] = mysapply(cytokines, function (c) {
-    fits = lapply(seq_along(times)[-1], function(i) lmer(fold_change ~ time + (1|donor), data=subset(dat, tissue==tissues[j] & cytokine==c & time %in% times[c(i-1,i)])))
-    names(fits)=paste0(times[2:length(times)], " vs. ", times[2:length(times)-1])
-    tab=getFormattedSummary(fits, robust=F, p.digits=3, exp10=T, trunc.large.est = F)
-    tab[2,]
+    # # lmm fit
+    # fits = lapply(seq_along(times)[-1], function(i) {
+    #   tmp=subset(dat, tissue==tissues[j] & cytokine==c & time %in% times[c(i-1,i)])
+    #   lmer(fold_change ~ time + (1|donor), data=tmp)
+    # })
+    # names(fits)=paste0(times[2:length(times)], " vs. ", times[2:length(times)-1])
+    # tab=getFormattedSummary(fits, robust=F, p.digits=3, exp10=T, trunc.large.est = F)
+    # tab[2,]
+    
+    # paired t test
+    pvals = sapply(seq_along(times)[-1], function(i) {
+      tmp=subset(dat, tissue==tissues[j] & cytokine==c & time %in% times[c(i-1,i)] & !is.na(fold_change))
+      f.paired.t(tmp, "fold_change", "time")
+    })
+    names(pvals)=paste0(times[2:length(times)], " vs. ", times[2:length(times)-1])
+    formatPvalues(pvals)
   }) 
 }
+
 # combine the two tables by interspering the rows
 tab=do.call(rbind, lapply(1:nrow(tabs[[1]]), function(i) {
   rbind(tabs[[1]][i,], tabs[[2]][i,])
 }))
 rownames(tab)=c(t(outer(cytokines, tissues, paste, sep=", ")))
-kable(tab)%>%
+kable(tab, align = 'c',
+      caption = "Paired t test p values.") %>%
   kable_styling(latex_options = "hold_position") %>% 
   row_spec(0, bold = TRUE, align = "c")%>%
   column_spec(1, width = "2.5cm") %>%  
@@ -396,10 +504,11 @@ kable(tab)%>%
 
 Data is not log10 transformed.
 
-
-
-```{r Fig 4C data, echo=F, message=F}
+```{r, message=F, echo=F}
 dat1=readxl::read_xlsx("data/Data_CytokinePaper_IRH-AZ_2025-11-6.xlsx", sheet="Figure 4C")
+```
+
+```{r Fig 4C data, echo=F, message=T}
 IC50=as.numeric(unlist(dat1[3,-1]))
 dat=data.frame(donor=as.character(rep(c(1:4,  6,7,9,10), each=3)), IC50, severe=rep(c(0,1), each=12))
 
@@ -409,12 +518,12 @@ dat$donor=factor(dat$donor)
 
 **Question**: Compare the IC50 value between asymptomatic and severe donors. Data represents three independent biological replicates for each donor
 
-```{r, echo=F, message=F}
+```{r 4C, echo=F, message=T}
 # myboxplot(IC50~severe, dat, col.points=as.numeric(dat$donor), xlab="Severe", cex=1.2, pch=16)
 
 fit = lmer(IC50 ~ severe + (1|donor), data=dat)
 tab=getFormattedSummary(list(IC50=fit), robust=F, p.digits=3, trunc.large.est = F)
-kable(tab[2,,drop=F], align='l')
+kable(tab[2,,drop=F], align='l', caption="Linear mixed model.")
 ```
 
 
@@ -423,11 +532,11 @@ kable(tab[2,,drop=F], align='l')
 
 Data is not log10 transformed.
 
-
-
-```{r Fig 4D data, echo=F, message=F}
-
+```{r, message=F, echo=F}
 dat1=readxl::read_xlsx("data/Data_CytokinePaper_IRH-AZ_2025-11-6.xlsx", sheet="Figure 4D")
+```
+
+```{r Fig 4D data, echo=F, message=T}
 
 IFNGR1=as.numeric(unlist(dat1[3,-1]))
 STAT1=as.numeric(unlist(dat1[8,-1]))
@@ -443,40 +552,56 @@ dat.STAT1$donor=factor(dat.STAT1$donor)
 **Question**: Compare the expression levels of both genes between asymptomatic and severe donors. Data represents three independent biological replicates for each donor
 
 
-```{r IFNGR1, echo=F, message=F}
+```{r IFNGR1, echo=F, message=T}
 # myboxplot(IFNGR1~severe, dat.IFNGR1, col.points=as.numeric(dat.IFNGR1$donor), xlab="Severe", cex=1.2, pch=16)
 
 fit = lmer(IFNGR1 ~ severe + (1|donor), data=dat.IFNGR1)
 tab=getFormattedSummary(list(IFNGR1=fit), robust=F, p.digits=3, trunc.large.est = F)
-kable(tab[2,,drop=F], align='l')
+kable(tab[2,,drop=F], align='l', caption="Linear mixed model.")
 ```
 
 
-```{r STAT1, echo=F, message=F}
+```{r STAT1, echo=F, message=T}
 # myboxplot(STAT1~severe, dat.STAT1, col.points=as.numeric(dat.STAT1$donor), xlab="Severe", cex=1.2, pch=16)
 
 fit = lmer(STAT1 ~ severe + (1|donor), data=dat.STAT1)
 tab=getFormattedSummary(list(STAT1=fit), robust=F, p.digits=3, trunc.large.est = F)
-kable(tab[2,,drop=F], align='l')
+kable(tab[2,,drop=F], align='l', caption="Linear mixed model.")
 ```
 
 
 
 \newpage
 ## Fig 6A, 6B, and 6C
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
 
 Data is log10 transformed for 6B and 6C and not 6A.
 
-**Question**: Determine if there is a statistically significant difference between asymptomatic and severe donors at each dose (6A, 6B() or at each time (6C) for each gene (CXCL10, CCL5, IL15, IL12, IFI16). Data represents three independent biological replicates for all 10 donors. 
+**Question**: Determine if there is a statistically significant difference between asymptomatic and severe donors at each dose (6A, 6B) or at each time (6C) for each gene (CXCL10, CCL5, IL15, IL12, IFI16) at dose 100. 
+
+Data represents three independent biological replicates for all 10 donors. 
+
+We first analyzed the data with linear mixed models. There are some warnings about singular values in 6B and 6C. Hence we re-analyzed the data with unpaired t tests.
 
 
-```{r Fig 6A 6B 6C, echo=F, message=F, results='asis'}
+```{r Fig 6ABC, echo=F, message=T, results='asis'}
 
 genes=c("CXCL10", "CCL5",  "IL15",  "IL12A", "IFI16"); names(genes)=genes
 
 for (a in c("A", "B", "C")) {
   
-  dat1=readxl::read_xlsx("data/Data_CytokinePaper_IRH-AZ_2025-11-6.xlsx", sheet=glue("Figure 6{a}"))
+  dat1=suppressMessages(
+    readxl::read_xlsx("data/Data_CytokinePaper_IRH-AZ_2025-11-6.xlsx", sheet=glue("Figure 6{a}"))
+  )
   
   doOneRow=function (x) {
     res = data.frame(donor=as.character(rep(c(1:10), each=3)), 
@@ -502,46 +627,137 @@ for (a in c("A", "B", "C")) {
     res
   }) -> dat.list
   
-  mysapply(genes, function (gene) {
-    fits = lapply(tmp, function(d) 
-      suppressWarnings(
-        lmer(readout ~ severe + (1|donor), data=dat.list[[gene]][[d]])
-      )
+  for (iter in 1:2) {
+    mysapply(genes, function (gene) {
+      if (iter==1) {
+        # lmm
+        fits = lapply(tmp, function(d) {
+          lmer(readout ~ severe + (1|donor), data=dat.list[[gene]][[d]])
+        })
+        tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
+        tab[2,]
+      }      
+      else {
+        # unpaired t test
+        pvals = sapply(tmp, function(d) {
+          tmp1=dat.list[[gene]][[d]] %>%
+            group_by(donor, severe) %>%
+            summarize(readout=mean(readout), .groups="drop")
+          t.test(readout~severe, data=tmp1)$p.val
+        })
+        formatPvalues(pvals)
+      }  
+    }) -> tab
+    tab
+  
+    tab=cbind(rownames(tab), tab)
+    colnames(tab)[1]=glue("6{a}")
+    print(
+      kable(tab, align="c", row.names=FALSE, caption=ifelse(iter==1,"Linear mixed models.", "Unpaired t tests.")) %>%  
+      kable_styling(latex_options = "hold_position") %>% 
+      column_spec(1, width = "1.1cm") %>%  
+      column_spec(2:(ncol(tab)), width = "3cm")%>%  # no 1+ncol b/c row.names is FALSE
+      row_spec(0, bold = TRUE, align = "c")%>%
+      row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
     )
-    tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
-    tab[2,]
-  }) -> tab
-  tab
-
-  tab=cbind(rownames(tab), tab)
-  colnames(tab)[1]=glue("6{a}")
-  print(
-    kable(tab, align="c", row.names=FALSE)%>%  
-    kable_styling(latex_options = "hold_position") %>% 
-    column_spec(1, width = "1.1cm") %>%  
-    column_spec(2:(ncol(tab)), width = "3cm")%>%  # no 1+ncol b/c row.names is FALSE
-    row_spec(0, bold = TRUE, align = "c")%>%
-    row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
-  )
+  }
+  
   cat("\\newpage\n")   # page break in LaTeX
 
 }
-
 ```
 
+## Fig 7A and 7B
 
 
-
-## Fig 7B and 7A
+**Question**: Determine if there is a statistically significant difference between the expression level of each gene (CXCL10, CCL5, IL15, IL12, IFI16) at each dose compared to the previous dose. For clarity, this is comparing 0.0 to 0.1, 0.1 to 1, 1 to 10, and 10 to 100. Data represents three independent biological replicates from 10 different donors
 
 Data is log10 transformed.
 
+```{r Fig 7A, echo=F, message=T, results='asis'}
+
+dat1=suppressMessages(
+  readxl::read_xlsx("data/Data_CytokinePaper_IRH-AZ_2025-11-6.xlsx", sheet=glue("Figure 7A"))
+)
+
+doOneRow=function (x) {
+  # use x[3:32] instead of x[-(1:2)] b/c there are some extra columns, not visible in excel, at the end
+  data.frame(donor=as.character(rep(c(1:10), each=3)), readout=log10(as.numeric(unlist(x[3:32]))), severe=rep(c(0,1), each=15))
+}
+
+genes1=c("CXCL9", "CXCL10",  "CXCL11"); names(genes1)=genes1
+rows=c("CXCL9"=list(4:8), "CXCL10"=list(12:16), "CXCL11"=list(20:24))
+
+lapply(genes1, function (gene) {
+  res=lapply(rows[[gene]], function (i) doOneRow(dat1[i-1,]))
+  names(res)=doses
+  res
+}) -> dat.list
+
+mysapply(genes1, function (gene) {
+  # # linear mixed model
+  # fits = lapply(2:len(doses), function(i) {
+  #   dat.tmp = rbind(
+  #     cbind(dose=doses[i-1], dat.list[[gene]][[doses[i-1]]], row.names=NULL),
+  #     cbind(dose=doses[i],   dat.list[[gene]][[doses[i]]], row.names=NULL)
+  #   )
+  #   dat.tmp$dose=factor(dat.tmp$dose, levels=doses)
+  # 
+  #   # suppressWarnings(
+  #     lmer(readout ~ dose + (1|donor), data=dat.tmp)
+  #   # )
+  # })
+  # names(fits)=doses[-1]
+  # tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
+  # res = tab[2,]
+  
+  # paired t test
+  out = sapply(2:len(doses), function(i) {
+    dat.tmp = rbind(
+      cbind(dose=doses[i-1], dat.list[[gene]][[doses[i-1]]], row.names=NULL),
+      cbind(dose=doses[i],   dat.list[[gene]][[doses[i]]], row.names=NULL)
+    )
+    dat.tmp$dose=factor(dat.tmp$dose, levels=doses)
+    f.paired.t(dat.tmp, "readout", "dose")
+  })
+  names(out)=paste0(doses[2:length(doses)], " vs. ", doses[2:length(doses)-1])
+  res = formatPvalues(out)
+    
+  all_same = sapply(2:len(doses), function(i) {
+    dat.tmp = rbind(
+      cbind(dose=doses[i-1], dat.list[[gene]][[doses[i-1]]], row.names=NULL),
+      cbind(dose=doses[i],   dat.list[[gene]][[doses[i]]], row.names=NULL)
+    )
+    len(unique(dat.tmp$readout))==1
+  })
+  res[all_same] = "all values identical"
+  res
+}) -> tab
+# colnames(tab)=glue("{colnames(tab)} vs. Prev. Dose")
+
+tab=cbind(rownames(tab), tab)
+colnames(tab)[1]="7A"
+kable(tab, align="c", caption="Paired t tests.", row.names=F)%>%  
+  kable_styling(latex_options = "hold_position") %>% 
+  # column_spec(1, width = "1.1cm") %>%  
+  column_spec(1:(ncol(tab)), width = "3cm")%>%  
+  row_spec(0, bold = TRUE, align = "c")%>%
+  row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
+
+
+```
+
+\newpage
+
 **Question**: Determine if there is a statistically significant difference between asymptomatic and severe donors at each dose (0, 0.1, 1, 10, 100). Data represents three independent biological replicates for all 10 donors.
 
+Data is log10 transformed.
 
-```{r Fig 7B, echo=F, message=F, results='asis'}
+```{r Fig 7B, echo=F, message=T, results='asis'}
 
-dat1=readxl::read_xlsx("data/Data_CytokinePaper_IRH-AZ_2025-11-6.xlsx", sheet=glue("Figure 7B"))
+dat1=suppressMessages(
+  readxl::read_xlsx("data/Data_CytokinePaper_IRH-AZ_2025-11-6.xlsx", sheet=glue("Figure 7B"))
+)
 
 doOneRow=function (x) {
   # use x[3:32] instead of x[-(1:2)] b/c there are some extra columns, not visible in excel, at the end
@@ -559,9 +775,9 @@ lapply(genes1, function (gene) {
 
 mysapply(genes1, function (gene) {
   fits = lapply(doses, function(d) {
-    suppressWarnings(
+    # suppressWarnings(
       lmer(readout ~ severe + (1|donor), data=dat.list[[gene]][[d]])
-    )
+    # )
   })
   names(fits)=doses
   tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
@@ -571,10 +787,12 @@ mysapply(genes1, function (gene) {
   res
 }) -> tab
 
-kable(tab, align="c")%>%  
+tab=cbind(rownames(tab), tab)
+colnames(tab)[1]="7B"
+kable(tab, align="c", row.names=F, caption="Linear mixed models.")%>%  
   kable_styling(latex_options = "hold_position") %>% 
-  column_spec(1, width = "1.1cm") %>%  
-  column_spec(2:(ncol(tab)+1), width = "3cm")%>%  
+  column_spec(1, width = "1.1cm") %>%
+  column_spec(2:(ncol(tab)), width = "3cm")%>%  
   row_spec(0, bold = TRUE, align = "c")%>%
   row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
 
@@ -582,64 +800,45 @@ kable(tab, align="c")%>%
 ```
 
 
-**Question**: Determine if there is a statistically significant difference between the expression level of each gene (CXCL10, CCL5, IL15, IL12, IFI16) at each dose compared to the previous dose. For clarity, this is comparing 0.0 to 0.1, 0.1 to 1, 1 to 10, and 10 to 100. Data represents three independent biological replicates from 10 different donors
-
-
-```{r Fig 7A, echo=F, message=F, results='asis'}
-
-dat1=readxl::read_xlsx("data/Data_CytokinePaper_IRH-AZ_2025-11-6.xlsx", sheet=glue("Figure 7A"))
-
-doOneRow=function (x) {
-  # use x[3:32] instead of x[-(1:2)] b/c there are some extra columns, not visible in excel, at the end
-  data.frame(donor=as.character(rep(c(1:10), each=3)), readout=log10(as.numeric(unlist(x[3:32]))), severe=rep(c(0,1), each=15))
-}
-
-genes1=c("CXCL9", "CXCL10",  "CXCL11"); names(genes1)=genes1
-rows=c("CXCL9"=list(4:8), "CXCL10"=list(12:16), "CXCL11"=list(20:24))
-
-lapply(genes1, function (gene) {
-  res=lapply(rows[[gene]], function (i) doOneRow(dat1[i-1,]))
-  names(res)=doses
-  res
-}) -> dat.list
+```{r Fig 7B rep, echo=F, message=T, results='asis'}
 
 mysapply(genes1, function (gene) {
-  fits = lapply(2:len(doses), function(i) {
-    dat.tmp = rbind(
-      cbind(dose=doses[i-1], dat.list[[gene]][[doses[i-1]]], row.names=NULL),
-      cbind(dose=doses[i],   dat.list[[gene]][[doses[i]]], row.names=NULL)
-    )
-    dat.tmp$dose=factor(dat.tmp$dose, levels=doses)
-
-    suppressWarnings(
-      lmer(readout ~ dose + (1|donor), data=dat.tmp)
-    )
-  })
-  names(fits)=doses[-1]
-  tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
-  res = tab[2,]
+  # fits = lapply(doses, function(d) {
+  #   # suppressWarnings(
+  #     lmer(readout ~ severe + (1|donor), data=dat.list[[gene]][[d]])
+  #   # )
+  # })
+  # names(fits)=doses
+  # tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
+  # res = tab[2,]
   
-  all_same = sapply(2:len(doses), function(i) {
-    dat.tmp = rbind(
-      cbind(dose=doses[i-1], dat.list[[gene]][[doses[i-1]]], row.names=NULL),
-      cbind(dose=doses[i],   dat.list[[gene]][[doses[i]]], row.names=NULL)
-    )
-    len(unique(dat.tmp$readout))==1
+  # unpaired t test
+  out = sapply(doses, function(d) {
+    tmp1=dat.list[[gene]][[d]] %>%
+      group_by(donor, severe) %>%
+      summarize(readout=mean(readout), .groups="drop")
+    t.test(readout~severe, data=tmp1)$p.val
   })
+  names(out)=doses
+  res = formatPvalues(out)
+  
+  sapply(doses, function(d) len(unique(dat.list[[gene]][[d]]$readout))==1) -> all_same
   res[all_same] = "all values identical"
   res
 }) -> tab
-colnames(tab)=glue("{colnames(tab)} vs. Prev. Dose")
 
-kable(tab, align="c")%>%  
+tab=cbind(rownames(tab), tab)
+colnames(tab)[1]="7B"
+kable(tab, align="c", row.names=F, caption="Unpaired t tests.")%>%  
   kable_styling(latex_options = "hold_position") %>% 
-  column_spec(1, width = "1.1cm") %>%  
-  column_spec(2:(ncol(tab)+1), width = "3cm")%>%  
+  column_spec(1, width = "1.1cm") %>%
+  column_spec(2:(ncol(tab)), width = "3cm")%>%  
   row_spec(0, bold = TRUE, align = "c")%>%
   row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
 
 
 ```
+
 
 
 \newpage
@@ -650,9 +849,10 @@ Data is log10 transformed.
 **Question**: Determine if there is a difference in pg/mL of protein between asymptomatic and severe in each treatment group (mock, 100U, virus, 100U+virus). 
 
 
-```{r Fig 8 q1, echo=F, message=F, results='asis'}
-
-dat1=readxl::read_xlsx("data/Data_CytokinePaper_IRH-AZ_2025-11-6.xlsx", sheet=glue("Figure 8"))
+```{r Fig 8 q1, echo=F, message=T, results='asis'}
+dat1=suppressMessages(
+  readxl::read_xlsx("data/Data_CytokinePaper_IRH-AZ_2025-11-6.xlsx", sheet=glue("Figure 8"))
+)
 
 doOneRow=function (x) {
   data.frame(donor=as.character(rep(c(1:10), each=3)), readout=log10(as.numeric(unlist(x[-(1)]))), severe=rep(c(0,1), each=15))
@@ -667,21 +867,24 @@ lapply(genes, function (gene) {
   res
 }) -> dat.list
 
+
 mysapply(genes, function (gene) {
-  fits = lapply(trts, function(d) {
-    suppressWarnings(
-      lmer(readout ~ severe + (1|donor), data=dat.list[[gene]][[d]])
-    )
+  res = sapply(trts, function(d) {
+    if (len(unique(dat.list[[gene]][[d]]$readout))==1) {
+      return(NA)
+    } else {
+      fits=list(lmer(readout ~ severe + (1|donor), data=dat.list[[gene]][[d]]))
+      tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
+      tab[2,]
+    }
   })
-  names(fits)=trts
-  tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
-  res = tab[2,]
+  names(res)=trts
   sapply(trts, function(d) len(unique(dat.list[[gene]][[d]]$readout))==1) -> all_same
   res[all_same] = "all values identical"
   res
 }) -> tab
 
-kable(tab, align="c")%>%  
+kable(tab, align="c", caption="Linear mixed models.")%>%  
   kable_styling(latex_options = "hold_position") %>% 
   column_spec(1, width = "1.1cm") %>%  
   column_spec(2:(1+ncol(tab)), width = "3cm")%>%  
@@ -689,63 +892,75 @@ kable(tab, align="c")%>%
   row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
 
 
-```
-
-
-**Question**: Determine if there is a difference in pg/mL of protein between Mock and each treatment (100U, Virus, 100U+Virus) within each group (asymptomatic, severe). For example, if there is a statistical difference between asymptomatic mock vs asymptomatic 100U
-
-
-```{r Fig 8 q2, echo=F, message=F, results='asis'}
-
-dat1=readxl::read_xlsx("data/Data_CytokinePaper_IRH-AZ_2025-11-6.xlsx", sheet=glue("Figure 8"))
-
-doOneRow=function (x) {
-  data.frame(donor=as.character(rep(c(1:10), each=3)), readout=log10(as.numeric(unlist(x[-(1)]))), severe=rep(c(0,1), each=15))
-}
-
-genes=c("CXCL9 4HPT", "CXCL9 12HPT",  "CXCL10 4HPT", "CXCL10 12HPT"); names(genes)=genes
-rows=c("CXCL9 4HPT"=list(5:8), "CXCL9 12HPT"=list(12:15), "CXCL10 4HPT"=list(19:22), "CXCL10 12HPT"=list(26:29))
-
-lapply(genes, function (gene) {
-  res=lapply(rows[[gene]], function (i) doOneRow(dat1[i-1,]))
-  names(res)=trts
-  res
-}) -> dat.list
-
+# now do it with unpaired t test
 mysapply(genes, function (gene) {
-  fits = lapply(trts[-1], function(d) {
-    dat.tmp = rbind(
-      cbind(trt="Mock", dat.list[[gene]][["Mock"]]),
-      cbind(trt=d, dat.list[[gene]][[d]])
-    )
-    dat.tmp$trt=factor(dat.tmp$trt, levels=trts)
-    suppressWarnings(
-      lmer(readout ~ trt + (1|donor), data=dat.tmp)
-    )
+  res = sapply(trts, function(d) {
+    if (len(unique(dat.list[[gene]][[d]]$readout))==1) {
+      return(NA)
+    } else {
+      dat.tmp = dat.list[[gene]][[d]] %>%
+        group_by(donor, severe) %>%
+        summarize(readout=mean(readout), .groups="drop")
+      formatPvalues(t.test(readout~severe, data=dat.tmp)$p.val) 
+    }
   })
-  names(fits)=trts[-1]
-  tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
-  res = tab[2,]
-  
-  all_same = sapply(trts[-1], function(d) {
-    dat.tmp = rbind(
-      cbind(trt="Mock", dat.list[[gene]][["Mock"]]),
-      cbind(trt=d, dat.list[[gene]][[d]])
-    )
-    len(unique(dat.tmp$readout))==1
-  })
+  names(res)=trts
+  sapply(trts, function(d) len(unique(dat.list[[gene]][[d]]$readout))==1) -> all_same
   res[all_same] = "all values identical"
   res
 }) -> tab
-colnames(tab)=glue("{colnames(tab)} vs. Mock") 
 
-kable(tab, align="c")%>%  
+kable(tab, align="c", caption="Unpaired t test pvals.")%>%  
   kable_styling(latex_options = "hold_position") %>% 
-  column_spec(2, width = "1.1cm") %>%  
-  column_spec(1:(1+ncol(tab)), width = "3cm")%>%  
+  column_spec(1, width = "1.1cm") %>%  
+  column_spec(2:(1+ncol(tab)), width = "3cm")%>%  
   row_spec(0, bold = TRUE, align = "c")%>%
   row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
 
+```
+
+\newpage
+**Question**: Determine if there is a difference in pg/mL of protein between Mock and each treatment (100U, Virus, 100U+Virus) within each group (asymptomatic, severe). For example, if there is a statistical difference between asymptomatic mock vs asymptomatic 100U
+
+```{r Fig 8 q2, echo=F, message=T, results='asis'}
+for (severe in 0:1) {
+    
+  mysapply(genes, function (gene) {
+    res = sapply(trts[-1], function(d) {
+      dat.tmp = rbind(
+        cbind(trt="Mock", dat.list[[gene]][["Mock"]]),
+        cbind(trt=d, dat.list[[gene]][[d]])
+      )
+      dat.tmp$trt=factor(dat.tmp$trt, levels=trts)
+      
+      if (severe==0) {
+        dat.tmp = subset(dat.tmp, severe==0)
+      } else {
+        dat.tmp = subset(dat.tmp, severe==1)
+      }
+      
+      if (len(unique(dat.tmp$readout))==1) {
+        return("all values identical")
+      } else {
+        # # lmm
+        # getFormattedSummary(list(lmer(readout ~ trt + (1|donor), data=dat.tmp)), robust=F, p.digits=3, trunc.large.est = F)[2,]
+        
+        # paired t test
+        formatPvalues(f.paired.t(dat.tmp, "readout", "trt"))
+      }
+    })
+    res
+  }) -> tab
+  colnames(tab)=glue("{colnames(tab)} vs. Mock") 
+  
+  print(kable(tab, align="c", caption=glue("Paired t test p values for {ifelse(severe==0, 'asym', 'severe')}."))%>%  
+    kable_styling(latex_options = "hold_position") %>% 
+    column_spec(2, width = "1.1cm") %>%  
+    column_spec(1:(1+ncol(tab)), width = "3cm")%>%  
+    row_spec(0, bold = TRUE, align = "c")%>%
+    row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]"))
+  
+}
 
 ```
 
@@ -755,8 +970,10 @@ kable(tab, align="c")%>%
 
 Data is not log10 transformed.
 
+Median of cellwise integrated intensity per donor per replicate is used as MFI.
 
-```{r cellprofiler data, echo=F, message=F, results='asis'}
+
+```{r cellprofiler data, echo=F, message=T, results='asis'}
 dat1=readxl::read_xlsx("data/2025-11-6_pSTAT1_NuclearFlr_Data.xlsx",
                         col_types = c("text", "numeric", "text", "numeric", "numeric", "numeric"),
                         sheet="Replicate_1")
@@ -767,15 +984,15 @@ dat2=readxl::read_xlsx("data/2025-11-6_pSTAT1_NuclearFlr_Data.xlsx",
 names(dat2) <- names(dat1)
 rbind(cbind(replicate=1, dat1), cbind(replicate=2, dat2)) -> dat.cellprofiler
 names(dat.cellprofiler)[names(dat.cellprofiler)=="Integrated Intensity"]="Integrated_Intensity"
+names(dat.cellprofiler)[names(dat.cellprofiler)=="Donor"]="donor"
 
 # compute MFI, defined as median of Integrated_Intensity, for each Sample, Replicate, Donor combination
 dat.cellprofiler %>%
-  group_by(Sample, replicate, Donor) %>%
-  summarize(MFI=median(Integrated_Intensity, na.rm=TRUE)) %>%
-  ungroup() -> dat.mfi
+  group_by(Sample, replicate, donor) %>%
+  summarize(MFI=median(Integrated_Intensity, na.rm=TRUE), .groups="drop") -> dat.mfi
 
-# filter out Donor NHEK
-dat.mfi = subset(dat.mfi, Donor != "NHEK")
+# filter out donor NHEK
+dat.mfi = subset(dat.mfi, donor != "NHEK")
 
 # add severe column
 dat.mfi$severe = ifelse(startsWith(dat.mfi$Sample, "Severe"), 1, 0)
@@ -796,15 +1013,15 @@ dat.mfi$time = factor(dat.mfi$time, levels=times2)
 # if not converted to data frame, an error is thrown while knitting but not when run interactively
 mywrite.csv(as.data.frame(dat.mfi), "data/Cellprofiler_MFI_data")
 
-# myboxplot(MFI~severe, subset(dat.mfi, time=="120M" & dose=="10"), col.points=as.numeric(dat.mfi$Donor), xlab="Severe", cex=1.2, pch=16)
+# myboxplot(MFI~severe, subset(dat.mfi, time=="120M" & dose=="10"), col.points=as.numeric(dat.mfi$donor), xlab="Severe", cex=1.2, pch=16)
 
 ```
 
 
-**Questions**: Determine if there are statistically significant differences between each time (30, 60, 120, 240 minutes) at each dose (0, 0.1, 1, 10, 100). Data represents fluorescence intensity in individual cells, collected across two independent experiments. Data is pooled across 10. For example, comparing 100U at 30 minutes to 100U at 60 minutes. 
+**Question 1**: Determine if there are statistically significant differences between each time (30, 60, 120, 240 minutes) at each dose (0, 0.1, 1, 10, 100). Data represents fluorescence intensity in individual cells, collected across two independent experiments. Data is pooled across 10. For example, comparing 100U at 30 minutes to 100U at 60 minutes. 
 
 
-```{r cellprofiler q1, echo=F, message=F, results='asis'}
+```{r cellprofiler q1, echo=F, message=T, results='asis'}
 
 lapply(doses, function (.dose) {
   res=lapply(times2, function (.t) {
@@ -814,23 +1031,37 @@ lapply(doses, function (.dose) {
 }) -> dat.list
 
 mysapply(doses, function (d) {
-  fits = lapply(2:len(times2), function(i) {
+  # # lmm
+  # fits = lapply(2:len(times2), function(i) {
+  #   dat.tmp = rbind(
+  #     cbind(time=times2[i-1], dat.list[[d]][[times2[i-1]]], row.names=NULL),
+  #     cbind(time=times2[i]  , dat.list[[d]][[times2[i]]], row.names=NULL)
+  #   )
+  #   # suppressWarnings(
+  #     lmer(MFI ~ time + (1|donor), data=dat.tmp)
+  #   # )
+  # })
+  # names(fits)=times2[-1]
+  # tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
+  # res = tab[2,]
+  # res
+  
+  # paired t test
+  out = sapply(2:len(times2), function(i) {
     dat.tmp = rbind(
-      cbind(time=times2[i-1], dat.list[[d]][[times2[i-1]]], row.names=NULL),
-      cbind(time=times2[i]  , dat.list[[d]][[times2[i]]], row.names=NULL)
+      cbind(dat.list[[d]][[times2[i-1]]], row.names=NULL),
+      cbind(dat.list[[d]][[times2[i]]], row.names=NULL)
     )
-    suppressWarnings(
-      lmer(MFI ~ time + (1|Donor), data=dat.tmp)
-    )
+    dat.tmp$time=factor(dat.tmp$time, levels=times2)
+    f.paired.t(dat.tmp, "MFI", "time")
   })
-  names(fits)=times2[-1]
-  tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
-  res = tab[2,]
+  names(out)=paste0(times2[2:length(times2)], " vs. ", times2[2:length(times2)-1])
+  res = formatPvalues(out)
   res
 }) -> tab
 colnames(tab)=glue("{colnames(tab)} vs. Prev. Time") 
 
-kable(tab, align="c")%>%  
+kable(tab, align="c", caption="Paired t test p values.")%>%  
   kable_styling(latex_options = "hold_position") %>% 
   column_spec(1, width = "1.1cm") %>%  
   column_spec(2:(1+ncol(tab)), width = "3cm")%>%  
@@ -842,9 +1073,9 @@ kable(tab, align="c")%>%
 
 \newpage
 
-**Questions**: Determine if there is a statistically significant difference between each dose (0.1, 1, 10, 100) to 0 at 30 minutes. For example, comparing 0 to 0.1, 0 to 1, 0 to 10, and 0 to 100 at 30 minutes.
+**Question 2**: Determine if there is a statistically significant difference between each dose (0.1, 1, 10, 100) to 0 at 30 minutes. For example, comparing 0 to 0.1, 0 to 1, 0 to 10, and 0 to 100 at 30 minutes.
 
-```{r cellprofiler q2, echo=F, message=F, results='asis'}
+```{r cellprofiler q2, echo=F, message=T, results='asis'}
 
 lapply(doses, function (.dose) {
   res=lapply(times2, function (.t) {
@@ -855,23 +1086,38 @@ lapply(doses, function (.dose) {
 
 
 mysapply(times2, function (t) {
-  fits = lapply(doses[-1], function(d) {
+  # # lmm
+  # fits = lapply(doses[-1], function(d) {
+  #   dat.tmp = rbind(
+  #     cbind(dose="0", dat.list[["0"]][[t]]),
+  #     cbind(dose=d,   dat.list[[d]][[t]])
+  #   )
+  #   # suppressWarnings(
+  #     lmer(MFI ~ dose + (1|donor), data=dat.tmp)
+  #   # )
+  # })
+  # names(fits)=doses[-1]
+  # tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
+  # res = tab[2,]
+  # res
+  
+  # paired t test
+  out = sapply(doses[-1], function(d) {
     dat.tmp = rbind(
-      cbind(dose="0", dat.list[["0"]][[t]]),
-      cbind(dose=d,   dat.list[[d]][[t]])
+      cbind(dat.list[["0"]][[t]], row.names=NULL),
+      cbind(dat.list[[d]][[t]], row.names=NULL)
     )
-    suppressWarnings(
-      lmer(MFI ~ dose + (1|Donor), data=dat.tmp)
-    )
+    dat.tmp$dose=factor(dat.tmp$dose, levels=doses)
+    f.paired.t(dat.tmp, "MFI", "dose")
   })
-  names(fits)=doses[-1]
-  tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
-  res = tab[2,]
+  names(out)=paste0(doses[2:length(doses)], " vs. 0")
+  res = formatPvalues(out)
   res
+  
 }) -> tab
-colnames(tab)=glue("{colnames(tab)} vs. 0") 
+# colnames(tab)=glue("{colnames(tab)} vs. 0") 
 
-kable(tab, align="c")%>%  
+kable(tab, align="c", caption="Paired t test")%>%  
   kable_styling(latex_options = "hold_position") %>% 
   column_spec(1, width = "1.1cm") %>%  
   column_spec(2:(1+ncol(tab)), width = "3cm")%>%  
@@ -883,11 +1129,9 @@ kable(tab, align="c")%>%
 
 \newpage
 
-**Questions**: Determine if there are any statistically significant differences between asymptomatic and severe at each dose (0, 0.1, 1, 10, 100) and each time (30, 60, 120, 240 minutes). For example, if there is a significant difference between asymptomatic 100U and severe 100U at 30 minutes
- 
- 
+**Question 3**: Determine if there are any statistically significant differences between asymptomatic and severe at each dose (0, 0.1, 1, 10, 100) and each time (30, 60, 120, 240 minutes). For example, if there is a significant difference between asymptomatic 100U and severe 100U at 30 minutes
 
-```{r cell profiler q3, echo=F, message=F, results='asis'}
+```{r cell profiler q3, echo=F, message=T, results='asis'}
 
 lapply(doses, function (.dose) {
   res=lapply(times2, function (.t) {
@@ -898,9 +1142,7 @@ lapply(doses, function (.dose) {
 
 mysapply(doses, function (dose) {
   fits = lapply(times2, function(t) {
-    suppressWarnings(
-      lmer(MFI ~ severe + (1|Donor), data=dat.list[[dose]][[t]])
-    )
+    lmer(MFI ~ severe + (1|donor), data=dat.list[[dose]][[t]])
   })
   names(fits)=times2
   tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
@@ -908,7 +1150,7 @@ mysapply(doses, function (dose) {
   res
 }) -> tab
 
-kable(tab, align="c")%>%  
+kable(tab, align="c", caption="Linear mixed models.")%>%  
   kable_styling(latex_options = "hold_position") %>% 
   column_spec(1, width = "1.1cm") %>%  
   column_spec(2:(1+ncol(tab)), width = "3cm")%>%  
@@ -918,7 +1160,26 @@ kable(tab, align="c")%>%
 
 ```
 
+```{r cell profiler q3 rep, echo=F, message=T, results='asis'}
 
+mysapply(doses, function (dose) {
+  pvals = sapply(times2, function(t) {
+    tmp1=dat.list[[dose]][[t]] %>%
+      group_by(donor, severe) %>%
+      summarize(MFI=mean(MFI), .groups="drop") 
+    t.test(MFI~severe, data=tmp1)$p.val
+  })
+  formatPvalues(pvals)
+}) -> tab
+
+kable(tab, align="c", caption="Unpaired t tests.")%>%  
+  kable_styling(latex_options = "hold_position") %>% 
+  column_spec(1, width = "1.1cm") %>%  
+  column_spec(2:(1+ncol(tab)), width = "3cm")%>%  
+  row_spec(0, bold = TRUE, align = "c")%>%
+  row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[2pt]")
+
+```
 
 \newpage
 # Appendix

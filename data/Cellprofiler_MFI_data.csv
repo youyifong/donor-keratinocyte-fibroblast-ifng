@@ -1,4 +1,4 @@
-"Sample","replicate","Donor","MFI","severe","dose","time"
+"Sample","replicate","donor","MFI","severe","dose","time"
 "01_120M",1,"1",55.72327088,0,"0.1","120M"
 "01_120M",1,"2",66.027915255,0,"0.1","120M"
 "01_120M",1,"3",55.24085562,0,"0.1","120M"
