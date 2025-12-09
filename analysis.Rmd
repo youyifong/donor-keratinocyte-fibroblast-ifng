@@ -573,16 +573,6 @@ kable(tab[2,,drop=F], align='l', caption="Linear mixed model.")
 
 \newpage
 ## Fig 6A, 6B, and 6C
-```{r}
-```
-
-
-```{r}
-```
-
-
-```{r}
-```
 
 Data is log10 transformed for 6B and 6C and not 6A.
 
@@ -591,6 +581,7 @@ Data is log10 transformed for 6B and 6C and not 6A.
 Data represents three independent biological replicates for all 10 donors. 
 
 We first analyzed the data with linear mixed models. There are some warnings about singular values in 6B and 6C. Hence we re-analyzed the data with unpaired t tests.
+
 
 
 ```{r Fig 6ABC, echo=F, message=T, results='asis'}
@@ -629,20 +620,51 @@ for (a in c("A", "B", "C")) {
   
   for (iter in 1:2) {
     mysapply(genes, function (gene) {
+      # print(gene)
       if (iter==1) {
         # lmm
-        fits = lapply(tmp, function(d) {
-          lmer(readout ~ severe + (1|donor), data=dat.list[[gene]][[d]])
+        fits <- lapply(tmp, function(d) {
+        
+          fit <- lmer(readout ~ severe + (1|donor), data = dat.list[[gene]][[d]])
+        
+          # flag warning if singular or has convergence messages
+          warn_flag <- FALSE
+        
+          # singularity
+          if (isSingular(fit, tol = 1e-4)) {
+            warn_flag <- TRUE
+          }
+        
+          # convergence warnings stored in optinfo
+          msgs <- fit@optinfo$conv$lme4$messages
+          if (!is.null(msgs)) {
+            warn_flag <- TRUE
+          }
+        
+          # store attribute
+          attr(fit, "warning_occurred") <- warn_flag
+          attr(fit, "convergence_messages") <- msgs
+        
+          fit
         })
+
         tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
-        tab[2,]
-      }      
-      else {
+        out = tab[2,]
+        # check for warnings
+        warnings = sapply(fits, function(fit) attr(fit, "warning_occurred"))
+        # print(warnings)
+        out[warnings] = paste0(out[warnings], "W")
+        out
+        
+      } else {
         # unpaired t test
         pvals = sapply(tmp, function(d) {
           tmp1=dat.list[[gene]][[d]] %>%
             group_by(donor, severe) %>%
             summarize(readout=mean(readout), .groups="drop")
+          # par(mfrow=c(1,2))
+          # myboxplot(readout~severe, data=tmp1, ylim=c(-1,1))
+          # myboxplot(readout~severe, data=tmp1)
           t.test(readout~severe, data=tmp1)$p.val
         })
         formatPvalues(pvals)
@@ -659,7 +681,7 @@ for (a in c("A", "B", "C")) {
       column_spec(2:(ncol(tab)), width = "3cm")%>%  # no 1+ncol b/c row.names is FALSE
       row_spec(0, bold = TRUE, align = "c")%>%
       row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
-    )
+    ) 
   }
   
   cat("\\newpage\n")   # page break in LaTeX
@@ -774,14 +796,40 @@ lapply(genes1, function (gene) {
 }) -> dat.list
 
 mysapply(genes1, function (gene) {
-  fits = lapply(doses, function(d) {
-    # suppressWarnings(
-      lmer(readout ~ severe + (1|donor), data=dat.list[[gene]][[d]])
-    # )
+  fits <- lapply(doses, function(d) {
+  
+    fit <- lmer(readout ~ severe + (1|donor), data=dat.list[[gene]][[d]])
+  
+    # flag warning if singular or has convergence messages
+    warn_flag <- FALSE
+  
+    # singularity
+    if (isSingular(fit, tol = 1e-4)) {
+      warn_flag <- TRUE
+    }
+  
+    # convergence warnings stored in optinfo
+    msgs <- fit@optinfo$conv$lme4$messages
+    if (!is.null(msgs)) {
+      warn_flag <- TRUE
+    }
+  
+    # store attribute
+    attr(fit, "warning_occurred") <- warn_flag
+    attr(fit, "convergence_messages") <- msgs
+  
+    fit
   })
+  
+  
   names(fits)=doses
   tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
   res = tab[2,]
+  
+  # check for warnings
+  warnings = sapply(fits, function(fit) attr(fit, "warning_occurred"))
+  res[warnings] = paste0(res[warnings], "W")
+
   sapply(doses, function(d) len(unique(dat.list[[gene]][[d]]$readout))==1) -> all_same
   res[all_same] = "all values identical"
   res
@@ -875,7 +923,26 @@ mysapply(genes, function (gene) {
     } else {
       fits=list(lmer(readout ~ severe + (1|donor), data=dat.list[[gene]][[d]]))
       tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
-      tab[2,]
+      out=tab[2,]
+      
+      warn_flag=F
+      
+      # singularity
+      if (isSingular(fits[[1]], tol = 1e-4)) {
+        warn_flag <- TRUE
+      }
+    
+      # convergence warnings stored in optinfo
+      msgs <- fits[[1]]@optinfo$conv$lme4$messages
+      if (!is.null(msgs)) {
+        warn_flag <- TRUE
+      }
+      
+      if (warn_flag) {
+        out = paste0(out, "W")
+      }
+      
+      out
     }
   })
   names(res)=trts
@@ -1141,12 +1208,40 @@ lapply(doses, function (.dose) {
 }) -> dat.list
 
 mysapply(doses, function (dose) {
-  fits = lapply(times2, function(t) {
-    lmer(MFI ~ severe + (1|donor), data=dat.list[[dose]][[t]])
+  
+  fits <- lapply(times2, function(t) {
+  
+    fit <- lmer(MFI ~ severe + (1|donor), data=dat.list[[dose]][[t]])
+  
+    # flag warning if singular or has convergence messages
+    warn_flag <- FALSE
+  
+    # singularity
+    if (isSingular(fit, tol = 1e-4)) {
+      warn_flag <- TRUE
+    }
+  
+    # convergence warnings stored in optinfo
+    msgs <- fit@optinfo$conv$lme4$messages
+    if (!is.null(msgs)) {
+      warn_flag <- TRUE
+    }
+  
+    # store attribute
+    attr(fit, "warning_occurred") <- warn_flag
+    attr(fit, "convergence_messages") <- msgs
+  
+    fit
   })
+  
   names(fits)=times2
   tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
   res = tab[2,]
+  
+  # check for warnings
+  warnings = sapply(fits, function(fit) attr(fit, "warning_occurred"))
+  res[warnings] = paste0(res[warnings], "W")
+  
   res
 }) -> tab
 
@@ -1160,7 +1255,7 @@ kable(tab, align="c", caption="Linear mixed models.")%>%
 
 ```
 
-```{r cell profiler q3 rep, echo=F, message=T, results='asis'}
+```{r cell profiler q3 t test, echo=F, message=T, results='asis'}
 
 mysapply(doses, function (dose) {
   pvals = sapply(times2, function(t) {
