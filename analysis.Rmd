@@ -72,6 +72,9 @@ Fold changes are computed from actin.
 
 When data are paired, paired t tests are used. When data are not paired, both unpaired t tests and linear mixed models (lmm) are used to analyze the data. t tests first average the outcome in the replicates, lmm uses all data. Lmm may be more efficient, but when there are warnings about singular values, the validyt of their results is in doubt. 
 
+W after p value means there is warning in the lmm.
+
+
 \newpage
 ## Fig 5A
 
@@ -1196,7 +1199,12 @@ kable(tab, align="c", caption="Paired t test")%>%
 
 \newpage
 
-**Question 3**: Determine if there are any statistically significant differences between asymptomatic and severe at each dose (0, 0.1, 1, 10, 100) and each time (30, 60, 120, 240 minutes). For example, if there is a significant difference between asymptomatic 100U and severe 100U at 30 minutes
+**Question 3**: Determine if there are any statistically significant differences between asymptomatic and severe at each dose (0, 0.1, 1, 10, 100) and each time (30, 60, 120, 240 minutes). For example, if there is a significant difference between asymptomatic 100U and severe 100U at 30 minutes.
+
+
+Two replicates only. So t tests are preferred over linear mixed models.
+
+
 
 ```{r cell profiler q3, echo=F, message=T, results='asis'}
 
