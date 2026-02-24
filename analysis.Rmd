@@ -1284,6 +1284,166 @@ kable(tab, align="c", caption="Unpaired t tests.")%>%
 
 ```
 
+
+\newpage
+# Updated Luminex data
+
+Data is log10 transformed.
+
+**Question**: Is there a difference between asymptomatic and severe donors at each dose in each cytokine? IE 0U vs 0U, 1U vs 1U, 100U vs 100U.
+
+```{r Fig updated Luminex q1, echo=F, message=T, results='asis'}
+dat1=suppressMessages(
+  readxl::read_xlsx("data/UpdatedLuminex_Data.xlsx", sheet=glue("Sheet1"))
+)
+
+doOneRow=function (x) {
+  data.frame(donor=as.character(rep(c(1:10), each=3)), readout=log10(as.numeric(unlist(x[-(1)]))), severe=rep(c(0,1), each=15))
+}
+
+genes=c("CXCL9", "CXCL10", "CXCL11"); names(genes)=genes
+rows=c("CXCL9"=list(5:7), "CXCL10"=list(15:17), "CXCL11"=list(25:27))
+
+rownames=c("0U", "1U", "100U")
+
+lapply(genes, function (gene) {
+  res=lapply(rows[[gene]], function (i) doOneRow(dat1[i-1,]))
+  names(res)=rownames
+  res
+}) -> dat.list
+
+
+mysapply(genes, function (gene) {
+  res = sapply(rownames, function(d) {
+    if (len(unique(dat.list[[gene]][[d]]$readout))==1) {
+      return(NA)
+    } else {
+      fits=list(lmer(readout ~ severe + (1|donor), data=dat.list[[gene]][[d]]))
+      tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
+      out=tab[2,]
+      
+      warn_flag=F
+      
+      # singularity
+      if (isSingular(fits[[1]], tol = 1e-4)) {
+        warn_flag <- TRUE
+      }
+    
+      # convergence warnings stored in optinfo
+      msgs <- fits[[1]]@optinfo$conv$lme4$messages
+      if (!is.null(msgs)) {
+        warn_flag <- TRUE
+      }
+      
+      if (warn_flag) {
+        out = paste0(out, "W")
+      }
+      
+      out
+    }
+  })
+  names(res)=rownames
+  sapply(rownames, function(d) len(unique(dat.list[[gene]][[d]]$readout))==1) -> all_same
+  res[all_same] = "all values identical"
+  res
+}) -> tab
+
+# set test p value to N/A for CXCL9 and CXCL11 at 0U because all values are under LOD and they only differ in concentration factors
+tab["CXCL9","0U"] <- tab["CXCL11","0U"] <- NA
+
+kable(tab, align="c", caption="Linear mixed models.")%>%  
+  kable_styling(latex_options = "hold_position") %>% 
+  column_spec(1, width = "1.1cm") %>%  
+  column_spec(2:(1+ncol(tab)), width = "3cm")%>%  
+  row_spec(0, bold = TRUE, align = "c")%>%
+  row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
+
+
+# now do it with unpaired t test
+mysapply(genes, function (gene) {
+  res = sapply(rownames, function(d) {
+    if (len(unique(dat.list[[gene]][[d]]$readout))==1) {
+      return(NA)
+    } else {
+      dat.tmp = dat.list[[gene]][[d]] %>%
+        group_by(donor, severe) %>%
+        summarize(readout=mean(readout), .groups="drop")
+      formatPvalues(t.test(readout~severe, data=dat.tmp)$p.val) 
+    }
+  })
+  names(res)=rownames
+  sapply(rownames, function(d) len(unique(dat.list[[gene]][[d]]$readout))==1) -> all_same
+  res[all_same] = "all values identical"
+  res
+}) -> tab
+
+# set test p value to N/A for CXCL9 and CXCL11 at 0U because all values are under LOD and they only differ in concentration factors
+tab["CXCL9","0U"] <- tab["CXCL11","0U"] <- NA
+
+kable(tab, align="c", caption="Unpaired t test pvals.")%>%  
+  kable_styling(latex_options = "hold_position") %>% 
+  column_spec(1, width = "1.1cm") %>%  
+  column_spec(2:(1+ncol(tab)), width = "3cm")%>%  
+  row_spec(0, bold = TRUE, align = "c")%>%
+  row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
+
+```
+
+\newpage
+**Question**: Is there a difference between 0U and 1U for each chemokine? Between 0U and 100U? Between 1U and 100U?
+
+```{r updated Luminex q2, echo=F, message=T, results='asis'}
+for (severe in 0:1) {
+    
+  mysapply(genes, function (gene) {
+    res = sapply(1:3, function(iter) {
+      if (iter==1) {
+        d1 = "0U"; d2 = "1U"
+      } else if (iter==2) {
+        d1 = "0U"; d2 = "100U"
+      } else if (iter==3) {
+        d1 = "1U"; d2 = "100U"
+      }
+      dat.tmp = rbind(
+        cbind(trt=d1, dat.list[[gene]][[d1]]),
+        cbind(trt=d2, dat.list[[gene]][[d2]])
+      )
+      dat.tmp$trt=factor(dat.tmp$trt, levels=rownames)
+      
+      if (severe==0) {
+        dat.tmp = subset(dat.tmp, severe==0)
+      } else {
+        dat.tmp = subset(dat.tmp, severe==1)
+      }
+      
+      if (len(unique(dat.tmp$readout))==1) {
+        return("all values identical")
+      } else {
+        # # lmm
+        # getFormattedSummary(list(lmer(readout ~ trt + (1|donor), data=dat.tmp)), robust=F, p.digits=3, trunc.large.est = F)[2,]
+        
+        # paired t test
+        v = formatPvalues(f.paired.t(dat.tmp, "readout", "trt"))
+        names(v) = glue("{d1} vs. {d2}")
+        v
+      }
+    })
+    res
+  }) -> tab
+  
+  print(kable(tab, align="c", caption=glue("Paired t test p values for {ifelse(severe==0, 'asym', 'severe')}."))%>%  
+    kable_styling(latex_options = "hold_position") %>% 
+    column_spec(2, width = "1.1cm") %>%  
+    column_spec(1:(1+ncol(tab)), width = "3cm")%>%  
+    row_spec(0, bold = TRUE, align = "c")%>%
+    row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]"))
+  
+}
+
+```
+
+
+
 \newpage
 # Appendix
 ```{r, echo = FALSE, message = FALSE, warning = FALSE, results='asis'}
