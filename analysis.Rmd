@@ -1351,7 +1351,7 @@ mysapply(genes, function (gene) {
 # set test p value to N/A for CXCL9 and CXCL11 at 0U because all values are under LOD and they only differ in concentration factors
 tab["CXCL9","0U"] <- tab["CXCL11","0U"] <- NA
 
-kable(tab, align="c", caption="Linear mixed models.")%>%  
+kable(tab, align="c", caption="Linear mixed models. P values set to N/A for CXCL9 and CXCL11 at 0U because all values are under LOD and they only differ inconcentration factors.")%>%  
   kable_styling(latex_options = "hold_position") %>% 
   column_spec(1, width = "1.1cm") %>%  
   column_spec(2:(1+ncol(tab)), width = "3cm")%>%  
@@ -1380,7 +1380,7 @@ mysapply(genes, function (gene) {
 # set test p value to N/A for CXCL9 and CXCL11 at 0U because all values are under LOD and they only differ in concentration factors
 tab["CXCL9","0U"] <- tab["CXCL11","0U"] <- NA
 
-kable(tab, align="c", caption="Unpaired t test pvals.")%>%  
+kable(tab, align="c", caption="Unpaired t test pvals. P values set to N/A for CXCL9 and CXCL11 at 0U because all values are under LOD and they only differ inconcentration factors.")%>%  
   kable_styling(latex_options = "hold_position") %>% 
   column_spec(1, width = "1.1cm") %>%  
   column_spec(2:(1+ncol(tab)), width = "3cm")%>%  
