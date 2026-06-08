@@ -1,0 +1,554 @@
+---
+title: "Analysis Leaving Out Donor 8"
+date: "`r Sys.Date()`"
+output: pdf_document
+header-includes:
+  - \usepackage{array}
+
+---
+
+```{r setup, include=FALSE}
+library(kyotil)
+library(knitr)
+library(kableExtra)
+library(lme4)
+library(readxl)
+library(glue)
+library(dplyr)
+
+# global variables, don't redefine in each section
+cytokines=c("CXCL10", "CCL5",  "IL15",  "IL12A", "IFI16"); names(cytokines)=cytokines
+trts=c("Mock", "100U", "Virus", "Virus+100U"); names(trts)=trts
+donors=c(4,5,7,10,1,2,3,6,8,9)
+doses=c("0", "0.1", "1", "10", "100"); names(doses)=doses
+tissues=c("Keratinocytes", "Fibroblasts"); names(tissues)=tissues
+times=c("Untreated", "4HPT", "24HPT"); names(times)=times
+times2=c("30M", "60M", "120M", "240M"); names(times2)=times2
+
+
+f.paired.t = function(dat, outcome, cond, print=F) {
+
+  # take average of replicates for each donor and trt
+  tmp = dat %>%
+    group_by(donor, !!sym(cond)) %>%
+    summarize(fc = mean(.data[[outcome]], na.rm = TRUE), .groups = "drop")
+
+  # reshape to wide format with one column per trt
+  tmp1 = reshape(as.data.frame(tmp), idvar = "donor", timevar = cond,
+                 direction = "wide")
+
+  # extract the two treatment groups inside the cond column
+  groups <- unique(dat[[cond]])
+  if (length(groups) != 2) {
+    stop("The cond column must contain exactly 2 treatment levels.")
+  }
+  # rename for clarity
+  g1 <- groups[1]
+  g2 <- groups[2]
+
+  # print(tmp1)
+  
+  # run paired t-test
+  test = t.test(tmp1[["fc."%.%g1]], tmp1[["fc."%.%g2]], paired = TRUE)
+
+  if (print) {
+    myboxplot(list(tmp1[["fc."%.%g1]], tmp1[["fc."%.%g2]]))
+    print(tmp1)
+    print(test)
+  }
+  
+  test$p.value
+}
+
+```
+
+\clearpage
+
+## Fig 6A, 6B, and 6C
+
+Data is log10 transformed for 6B and 6C and not 6A.
+
+**Question**: Determine if there is a statistically significant difference between asymptomatic and severe donors at each dose (6A, 6B) or at each time (6C) for each gene (CXCL10, CCL5, IL15, IL12, IFI16) at dose 100. 
+
+Data represents three independent biological replicates for all 10 donors. 
+
+We first analyzed the data with linear mixed models. There are some warnings about singular values in 6B and 6C. Hence we re-analyzed the data with unpaired t tests.
+
+
+
+```{r Fig 6ABC, echo=F, message=T, results='asis'}
+
+genes=c("CXCL10", "CCL5",  "IL15",  "IL12A", "IFI16"); names(genes)=genes
+
+for (a in c("A", "B", "C")) {
+  
+  dat1=suppressMessages(
+    readxl::read_xlsx("data/Data_CytokinePaper_IRH-AZ_2025-11-6.xlsx", sheet=glue("Figure 6{a}"))
+  )
+  
+  doOneRow=function (x) {
+    res = data.frame(donor=as.character(rep(c(1:10), each=3)), 
+               readout=(as.numeric(unlist(x[-(1:2)]))), 
+               severe=rep(c(0,1), each=15))
+    if (a=="B" | a=="C") {
+      res$readout = log10(res$readout)
+    }
+    # filter out donor 8
+    res = subset(res, donor!="8")
+    res
+  }
+  
+  if (a=="A" | a=="B") {
+    rows=c(CXCL10=list(4:8), CCL5=list(12:16), IL15=list(20:24), IL12A=list(28:32), IFI16=list(36:40))
+  } else if (a=="C") {
+    rows=c(CXCL10=list(4:6), CCL5=list(10:12), IL15=list(16:18), IL12A=list(22:24), IFI16=list(28:30))
+  }
+  
+  tmp = if (a=="A" | a=="B") doses else times
+  
+  lapply(genes, function (gene) {
+    res=lapply(rows[[gene]], function (i) doOneRow(dat1[i-1,]))
+    names(res)= tmp
+    res
+  }) -> dat.list
+  
+  for (iter in 1:2) {
+    mysapply(genes, function (gene) {
+      # print(gene)
+      if (iter==1) {
+        # lmm
+        fits <- lapply(tmp, function(d) {
+        
+          fit <- lmer(readout ~ severe + (1|donor), data = dat.list[[gene]][[d]])
+        
+          # flag warning if singular or has convergence messages
+          warn_flag <- FALSE
+        
+          # singularity
+          if (isSingular(fit, tol = 1e-4)) {
+            warn_flag <- TRUE
+          }
+        
+          # convergence warnings stored in optinfo
+          msgs <- fit@optinfo$conv$lme4$messages
+          if (!is.null(msgs)) {
+            warn_flag <- TRUE
+          }
+        
+          # store attribute
+          attr(fit, "warning_occurred") <- warn_flag
+          attr(fit, "convergence_messages") <- msgs
+        
+          fit
+        })
+
+        tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
+        out = tab[2,]
+        # check for warnings
+        warnings = sapply(fits, function(fit) attr(fit, "warning_occurred"))
+        # print(warnings)
+        out[warnings] = paste0(out[warnings], "W")
+        out
+        
+      } else {
+        # unpaired t test
+        pvals = sapply(tmp, function(d) {
+          tmp1=dat.list[[gene]][[d]] %>%
+            group_by(donor, severe) %>%
+            summarize(readout=mean(readout), .groups="drop")
+          # par(mfrow=c(1,2))
+          # myboxplot(readout~severe, data=tmp1, ylim=c(-1,1))
+          # myboxplot(readout~severe, data=tmp1)
+          t.test(readout~severe, data=tmp1)$p.val
+        })
+        formatPvalues(pvals)
+      }  
+    }) -> tab
+    tab
+  
+    tab=cbind(rownames(tab), tab)
+    colnames(tab)[1]=glue("6{a}")
+    print(
+      kable(tab, align="c", row.names=FALSE, caption=ifelse(iter==1,"Linear mixed models.", "Unpaired t tests.")) %>%  
+      kable_styling(latex_options = "hold_position") %>% 
+      column_spec(1, width = "1.1cm") %>%  
+      column_spec(2:(ncol(tab)), width = "3cm")%>%  # no 1+ncol b/c row.names is FALSE
+      row_spec(0, bold = TRUE, align = "c")%>%
+      row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
+    ) 
+  }
+  
+  cat("\\newpage\n")   # page break in LaTeX
+
+}
+```
+
+## Fig 7A and 7B
+
+
+**Question**: Determine if there is a statistically significant difference between the expression level of each gene (CXCL10, CCL5, IL15, IL12, IFI16) at each dose compared to the previous dose. For clarity, this is comparing 0.0 to 0.1, 0.1 to 1, 1 to 10, and 10 to 100. Data represents three independent biological replicates from 10 different donors
+
+Data is log10 transformed.
+
+```{r Fig 7A, echo=F, message=T, results='asis'}
+
+dat1=suppressMessages(
+  readxl::read_xlsx("data/Data_CytokinePaper_IRH-AZ_2025-11-6.xlsx", sheet=glue("Figure 7A"))
+)
+
+doOneRow=function (x) {
+  # use x[3:32] instead of x[-(1:2)] b/c there are some extra columns, not visible in excel, at the end
+  res = data.frame(donor=as.character(rep(c(1:10), each=3)), readout=log10(as.numeric(unlist(x[3:32]))), severe=rep(c(0,1), each=15))
+  # filter out donor 8
+  res = subset(res, donor!="8")
+  res
+}
+
+genes1=c("CXCL9", "CXCL10",  "CXCL11"); names(genes1)=genes1
+rows=c("CXCL9"=list(4:8), "CXCL10"=list(12:16), "CXCL11"=list(20:24))
+
+lapply(genes1, function (gene) {
+  res=lapply(rows[[gene]], function (i) doOneRow(dat1[i-1,]))
+  names(res)=doses
+  res
+}) -> dat.list
+
+mysapply(genes1, function (gene) {
+  # # linear mixed model
+  # fits = lapply(2:len(doses), function(i) {
+  #   dat.tmp = rbind(
+  #     cbind(dose=doses[i-1], dat.list[[gene]][[doses[i-1]]], row.names=NULL),
+  #     cbind(dose=doses[i],   dat.list[[gene]][[doses[i]]], row.names=NULL)
+  #   )
+  #   dat.tmp$dose=factor(dat.tmp$dose, levels=doses)
+  # 
+  #   # suppressWarnings(
+  #     lmer(readout ~ dose + (1|donor), data=dat.tmp)
+  #   # )
+  # })
+  # names(fits)=doses[-1]
+  # tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
+  # res = tab[2,]
+  
+  # paired t test
+  out = sapply(2:len(doses), function(i) {
+    dat.tmp = rbind(
+      cbind(dose=doses[i-1], dat.list[[gene]][[doses[i-1]]], row.names=NULL),
+      cbind(dose=doses[i],   dat.list[[gene]][[doses[i]]], row.names=NULL)
+    )
+    dat.tmp$dose=factor(dat.tmp$dose, levels=doses)
+    f.paired.t(dat.tmp, "readout", "dose")
+  })
+  names(out)=paste0(doses[2:length(doses)], " vs. ", doses[2:length(doses)-1])
+  res = formatPvalues(out)
+    
+  all_same = sapply(2:len(doses), function(i) {
+    dat.tmp = rbind(
+      cbind(dose=doses[i-1], dat.list[[gene]][[doses[i-1]]], row.names=NULL),
+      cbind(dose=doses[i],   dat.list[[gene]][[doses[i]]], row.names=NULL)
+    )
+    len(unique(dat.tmp$readout))==1
+  })
+  res[all_same] = "all values identical"
+  res
+}) -> tab
+# colnames(tab)=glue("{colnames(tab)} vs. Prev. Dose")
+
+tab=cbind(rownames(tab), tab)
+colnames(tab)[1]="7A"
+kable(tab, align="c", caption="Paired t tests.", row.names=F)%>%  
+  kable_styling(latex_options = "hold_position") %>% 
+  # column_spec(1, width = "1.1cm") %>%  
+  column_spec(1:(ncol(tab)), width = "3cm")%>%  
+  row_spec(0, bold = TRUE, align = "c")%>%
+  row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
+
+
+```
+
+\newpage
+
+**Question**: Determine if there is a statistically significant difference between asymptomatic and severe donors at each dose (0, 0.1, 1, 10, 100). Data represents three independent biological replicates for all 10 donors.
+
+Data is log10 transformed.
+
+```{r Fig 7B, echo=F, message=T, results='asis'}
+
+dat1=suppressMessages(
+  readxl::read_xlsx("data/Data_CytokinePaper_IRH-AZ_2025-11-6.xlsx", sheet=glue("Figure 7B"))
+)
+
+doOneRow=function (x) {
+  # use x[3:32] instead of x[-(1:2)] b/c there are some extra columns, not visible in excel, at the end
+  res = data.frame(donor=as.character(rep(c(1:10), each=3)), readout=log10(as.numeric(unlist(x[3:32]))), severe=rep(c(0,1), each=15))
+  # filter out donor 8
+  res = subset(res, donor!="8")
+  res
+}
+
+genes1=c("CXCL9", "CXCL10",  "CXCL11"); names(genes1)=genes1
+rows=c("CXCL9"=list(4:8), "CXCL10"=list(12:16), "CXCL11"=list(20:24))
+
+lapply(genes1, function (gene) {
+  res=lapply(rows[[gene]], function (i) doOneRow(dat1[i-1,]))
+  names(res)=doses
+  res
+}) -> dat.list
+
+mysapply(genes1, function (gene) {
+  fits <- lapply(doses, function(d) {
+  
+    fit <- lmer(readout ~ severe + (1|donor), data=dat.list[[gene]][[d]])
+  
+    # flag warning if singular or has convergence messages
+    warn_flag <- FALSE
+  
+    # singularity
+    if (isSingular(fit, tol = 1e-4)) {
+      warn_flag <- TRUE
+    }
+  
+    # convergence warnings stored in optinfo
+    msgs <- fit@optinfo$conv$lme4$messages
+    if (!is.null(msgs)) {
+      warn_flag <- TRUE
+    }
+  
+    # store attribute
+    attr(fit, "warning_occurred") <- warn_flag
+    attr(fit, "convergence_messages") <- msgs
+  
+    fit
+  })
+  
+  
+  names(fits)=doses
+  tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
+  res = tab[2,]
+  
+  # check for warnings
+  warnings = sapply(fits, function(fit) attr(fit, "warning_occurred"))
+  res[warnings] = paste0(res[warnings], "W")
+
+  sapply(doses, function(d) len(unique(dat.list[[gene]][[d]]$readout))==1) -> all_same
+  res[all_same] = "all values identical"
+  res
+}) -> tab
+
+tab=cbind(rownames(tab), tab)
+colnames(tab)[1]="7B"
+kable(tab, align="c", row.names=F, caption="Linear mixed models.")%>%  
+  kable_styling(latex_options = "hold_position") %>% 
+  column_spec(1, width = "1.1cm") %>%
+  column_spec(2:(ncol(tab)), width = "3cm")%>%  
+  row_spec(0, bold = TRUE, align = "c")%>%
+  row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
+
+
+```
+
+
+```{r Fig 7B rep, echo=F, message=T, results='asis'}
+
+mysapply(genes1, function (gene) {
+  # fits = lapply(doses, function(d) {
+  #   # suppressWarnings(
+  #     lmer(readout ~ severe + (1|donor), data=dat.list[[gene]][[d]])
+  #   # )
+  # })
+  # names(fits)=doses
+  # tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
+  # res = tab[2,]
+  
+  # unpaired t test
+  out = sapply(doses, function(d) {
+    tmp1=dat.list[[gene]][[d]] %>%
+      group_by(donor, severe) %>%
+      summarize(readout=mean(readout), .groups="drop")
+    t.test(readout~severe, data=tmp1)$p.val
+  })
+  names(out)=doses
+  res = formatPvalues(out)
+  
+  sapply(doses, function(d) len(unique(dat.list[[gene]][[d]]$readout))==1) -> all_same
+  res[all_same] = "all values identical"
+  res
+}) -> tab
+
+tab=cbind(rownames(tab), tab)
+colnames(tab)[1]="7B"
+kable(tab, align="c", row.names=F, caption="Unpaired t tests.")%>%  
+  kable_styling(latex_options = "hold_position") %>% 
+  column_spec(1, width = "1.1cm") %>%
+  column_spec(2:(ncol(tab)), width = "3cm")%>%  
+  row_spec(0, bold = TRUE, align = "c")%>%
+  row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
+
+
+```
+
+
+
+\newpage
+# Updated Luminex data
+
+Data is log10 transformed.
+
+**Question**: Is there a difference between asymptomatic and severe donors at each dose in each cytokine? IE 0U vs 0U, 1U vs 1U, 100U vs 100U.
+
+```{r Fig updated Luminex q1, echo=F, message=T, results='asis'}
+dat1=suppressMessages(
+  readxl::read_xlsx("data/UpdatedLuminex_Data.xlsx", sheet=glue("Sheet1"))
+)
+
+doOneRow=function (x) {
+  res = data.frame(donor=as.character(rep(c(1:10), each=3)), readout=log10(as.numeric(unlist(x[-(1)]))), severe=rep(c(0,1), each=15))
+  # filter out donor 8
+  res = subset(res, donor!="8")
+  res
+}
+
+genes=c("CXCL9", "CXCL10", "CXCL11"); names(genes)=genes
+rows=c("CXCL9"=list(5:7), "CXCL10"=list(15:17), "CXCL11"=list(25:27))
+
+rownames=c("0U", "1U", "100U")
+
+lapply(genes, function (gene) {
+  res=lapply(rows[[gene]], function (i) doOneRow(dat1[i-1,]))
+  names(res)=rownames
+  res
+}) -> dat.list
+
+
+mysapply(genes, function (gene) {
+  res = sapply(rownames, function(d) {
+    if (len(unique(dat.list[[gene]][[d]]$readout))==1) {
+      return(NA)
+    } else {
+      fits=list(lmer(readout ~ severe + (1|donor), data=dat.list[[gene]][[d]]))
+      tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
+      out=tab[2,]
+      
+      warn_flag=F
+      
+      # singularity
+      if (isSingular(fits[[1]], tol = 1e-4)) {
+        warn_flag <- TRUE
+      }
+    
+      # convergence warnings stored in optinfo
+      msgs <- fits[[1]]@optinfo$conv$lme4$messages
+      if (!is.null(msgs)) {
+        warn_flag <- TRUE
+      }
+      
+      if (warn_flag) {
+        out = paste0(out, "W")
+      }
+      
+      out
+    }
+  })
+  names(res)=rownames
+  sapply(rownames, function(d) len(unique(dat.list[[gene]][[d]]$readout))==1) -> all_same
+  res[all_same] = "all values identical"
+  res
+}) -> tab
+
+# set test p value to N/A for CXCL9 and CXCL11 at 0U because all values are under LOD and they only differ in concentration factors
+tab["CXCL9","0U"] <- tab["CXCL11","0U"] <- NA
+
+kable(tab, align="c", caption="Linear mixed models. P values set to N/A for CXCL9 and CXCL11 at 0U because all values are under LOD and they only differ inconcentration factors.")%>%  
+  kable_styling(latex_options = "hold_position") %>% 
+  column_spec(1, width = "1.1cm") %>%  
+  column_spec(2:(1+ncol(tab)), width = "3cm")%>%  
+  row_spec(0, bold = TRUE, align = "c")%>%
+  row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
+
+
+# now do it with unpaired t test
+mysapply(genes, function (gene) {
+  res = sapply(rownames, function(d) {
+    if (len(unique(dat.list[[gene]][[d]]$readout))==1) {
+      return(NA)
+    } else {
+      dat.tmp = dat.list[[gene]][[d]] %>%
+        group_by(donor, severe) %>%
+        summarize(readout=mean(readout), .groups="drop")
+      formatPvalues(t.test(readout~severe, data=dat.tmp)$p.val) 
+    }
+  })
+  names(res)=rownames
+  sapply(rownames, function(d) len(unique(dat.list[[gene]][[d]]$readout))==1) -> all_same
+  res[all_same] = "all values identical"
+  res
+}) -> tab
+
+# set test p value to N/A for CXCL9 and CXCL11 at 0U because all values are under LOD and they only differ in concentration factors
+tab["CXCL9","0U"] <- tab["CXCL11","0U"] <- NA
+
+kable(tab, align="c", caption="Unpaired t test pvals. P values set to N/A for CXCL9 and CXCL11 at 0U because all values are under LOD and they only differ inconcentration factors.")%>%  
+  kable_styling(latex_options = "hold_position") %>% 
+  column_spec(1, width = "1.1cm") %>%  
+  column_spec(2:(1+ncol(tab)), width = "3cm")%>%  
+  row_spec(0, bold = TRUE, align = "c")%>%
+  row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
+
+```
+
+\newpage
+**Question**: Is there a difference between 0U and 1U for each chemokine? Between 0U and 100U? Between 1U and 100U?
+
+```{r updated Luminex q2, echo=F, message=T, results='asis'}
+for (severe in 0:1) {
+    
+  mysapply(genes, function (gene) {
+    res = sapply(1:3, function(iter) {
+      if (iter==1) {
+        d1 = "0U"; d2 = "1U"
+      } else if (iter==2) {
+        d1 = "0U"; d2 = "100U"
+      } else if (iter==3) {
+        d1 = "1U"; d2 = "100U"
+      }
+      dat.tmp = rbind(
+        cbind(trt=d1, dat.list[[gene]][[d1]]),
+        cbind(trt=d2, dat.list[[gene]][[d2]])
+      )
+      dat.tmp$trt=factor(dat.tmp$trt, levels=rownames)
+      
+      if (severe==0) {
+        dat.tmp = subset(dat.tmp, severe==0)
+      } else {
+        dat.tmp = subset(dat.tmp, severe==1)
+      }
+      
+      if (len(unique(dat.tmp$readout))==1) {
+        return("all values identical")
+      } else {
+        # # lmm
+        # getFormattedSummary(list(lmer(readout ~ trt + (1|donor), data=dat.tmp)), robust=F, p.digits=3, trunc.large.est = F)[2,]
+        
+        # paired t test
+        v = formatPvalues(f.paired.t(dat.tmp, "readout", "trt"))
+        names(v) = glue("{d1} vs. {d2}")
+        v
+      }
+    })
+    res
+  }) -> tab
+  
+  print(kable(tab, align="c", caption=glue("Paired t test p values for {ifelse(severe==0, 'asym', 'severe')}."))%>%  
+    kable_styling(latex_options = "hold_position") %>% 
+    column_spec(2, width = "1.1cm") %>%  
+    column_spec(1:(1+ncol(tab)), width = "3cm")%>%  
+    row_spec(0, bold = TRUE, align = "c")%>%
+    row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]"))
+  
+}
+
+```
+
+
+
+\newpage
