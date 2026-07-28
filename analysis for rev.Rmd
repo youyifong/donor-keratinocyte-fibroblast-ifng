@@ -1,0 +1,372 @@
+---
+title: "Analysis for Revision"
+date: "`r Sys.Date()`"
+output: pdf_document
+header-includes:
+  - \usepackage{array}
+
+---
+
+```{r setup, include=FALSE}
+library(kyotil)
+library(knitr)
+library(kableExtra)
+library(lme4)
+library(readxl)
+library(glue)
+library(dplyr)
+
+# global variables, don't redefine in each section
+cytokines=c("CXCL10", "CCL5",  "IL15",  "IL12A", "IFI16"); names(cytokines)=cytokines
+trts=c("Mock", "100U", "Virus", "Virus+100U"); names(trts)=trts
+donors=c(4,5,7,10,1,2,3,6,8,9)
+doses=c("0", "0.1", "1", "10", "100"); names(doses)=doses
+tissues=c("Keratinocytes", "Fibroblasts"); names(tissues)=tissues
+times=c("Untreated", "4HPT", "24HPT"); names(times)=times
+times2=c("30M", "60M", "120M", "240M"); names(times2)=times2
+
+
+f.paired.t = function(dat, outcome, cond, print=F) {
+
+  # take average of replicates for each donor and trt
+  tmp = dat %>%
+    group_by(donor, !!sym(cond)) %>%
+    summarize(fc = mean(.data[[outcome]], na.rm = TRUE), .groups = "drop")
+
+  # reshape to wide format with one column per trt
+  tmp1 = reshape(as.data.frame(tmp), idvar = "donor", timevar = cond,
+                 direction = "wide")
+
+  # extract the two treatment groups inside the cond column
+  groups <- unique(dat[[cond]])
+  if (length(groups) != 2) {
+    stop("The cond column must contain exactly 2 treatment levels.")
+  }
+  # rename for clarity
+  g1 <- groups[1]
+  g2 <- groups[2]
+
+  # print(tmp1)
+  
+  # run paired t-test
+  test = t.test(tmp1[["fc."%.%g1]], tmp1[["fc."%.%g2]], paired = TRUE)
+
+  if (print) {
+    myboxplot(list(tmp1[["fc."%.%g1]], tmp1[["fc."%.%g2]]))
+    print(tmp1)
+    print(test)
+  }
+  
+  test$p.value
+}
+
+```
+
+# HSV1 HSV2
+
+Data is used as is because not skewed.
+
+**Question**: Is there a difference between asymptomatic and severe at any dose?
+
+```{r, echo=F, message=T, results='asis'}
+dat1=suppressMessages(
+  readxl::read_xlsx("data/2026-7-2_PLOS-Review-Data.xlsx", sheet=glue("HSV1-GFP"))
+)
+
+doOneRow=function (x) {
+  data.frame(donor=as.character(rep(c(1:8), each=3)), readout=(as.numeric(unlist(x[-(1)]))), severe=rep(c(0,1), each=12))
+}
+
+rownames=c("3.7U", "11.1U", "33.3U", "100U")
+
+genes=c("HSV1", "HSV2"); names(genes)=genes
+rows=c("HSV1"=list(6:9), "HSV2"=list(13:16))
+
+lapply(genes, function (gene) {
+  res=lapply(rows[[gene]], function (i) doOneRow(dat1[i-1,]))
+  names(res)=rownames
+  res
+}) -> dat.list
+
+
+
+mysapply(genes, function (gene) {
+  
+  res = sapply(rownames, function(d) {
+    if (len(unique(dat.list[[gene]][[d]]$readout))==1) {
+      return(NA)
+    } else {
+      fits=list(lmer(readout ~ severe + (1|donor), data=dat.list[[gene]][[d]]))
+      tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
+      out=tab[2,]
+      
+      warn_flag=F
+      
+      # singularity
+      if (isSingular(fits[[1]], tol = 1e-4)) {
+        warn_flag <- TRUE
+      }
+    
+      # convergence warnings stored in optinfo
+      msgs <- fits[[1]]@optinfo$conv$lme4$messages
+      if (!is.null(msgs)) {
+        warn_flag <- TRUE
+      }
+      
+      if (warn_flag) {
+        out = paste0(out, "W")
+      }
+      
+      out
+    }
+  })
+  names(res)=rownames
+  sapply(rownames, function(d) len(unique(dat.list[[d]]$readout))==1) -> all_same
+  res[all_same] = "all values identical"
+  res
+}) -> tab
+
+  
+  
+
+kable(tab, align="c", caption="Linear mixed models. ")%>%  
+  kable_styling(latex_options = "hold_position") %>% 
+  column_spec(1, width = "1.1cm") %>%  
+  column_spec(2:(1+ncol(tab)), width = "3cm")%>%  
+  row_spec(0, bold = TRUE, align = "c")%>%
+  row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
+
+
+# now do it with unpaired t test
+mysapply(genes, function (gene) {
+  res = sapply(rownames, function(d) {
+    if (len(unique(dat.list[[gene]][[d]]$readout))==1) {
+      return(NA)
+    } else {
+      dat.tmp = dat.list[[gene]][[d]] %>%
+        group_by(donor, severe) %>%
+        summarize(readout=mean(readout), .groups="drop")
+      formatPvalues(t.test(readout~severe, data=dat.tmp)$p.val) 
+    }
+  })
+  names(res)=rownames
+  sapply(rownames, function(d) len(unique(dat.list[[gene]][[d]]$readout))==1) -> all_same
+  res[all_same] = "all values identical"
+  res
+}) -> tab
+
+
+kable(tab, align="c", caption="Unpaired t test pvals. ")%>%  
+  kable_styling(latex_options = "hold_position") %>% 
+  column_spec(1, width = "1.1cm") %>%  
+  column_spec(2:(1+ncol(tab)), width = "3cm")%>%  
+  row_spec(0, bold = TRUE, align = "c")%>%
+  row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
+
+```
+
+
+# CCL5
+
+Data is log transformed as it is skewed.
+
+```{r, echo=F, message=T, results='asis'}
+dat1=suppressMessages(
+  readxl::read_xlsx("data/2026-7-2_PLOS-Review-Data.xlsx", sheet=glue("CCL5"))
+)
+
+doOneRow=function (x) {
+  data.frame(donor=as.character(rep(c(1:8), each=3)), readout=log10(as.numeric(unlist(x[-(1)]))), severe=rep(c(0,1), each=12))
+}
+
+rownames=c("0U", "0.1U", "1U", "10U", "100U")
+
+genes=c("CCL5"); names(genes)=genes
+rows=c("CCL5"=list(6:10))
+
+lapply(genes, function (gene) {
+  res=lapply(rows[[gene]], function (i) doOneRow(dat1[i-1,]))
+  names(res)=rownames
+  res
+}) -> dat.list
+
+
+
+mysapply(genes, function (gene) {
+  
+  res = sapply(rownames, function(d) {
+    if (len(unique(dat.list[[gene]][[d]]$readout))==1) {
+      return(NA)
+    } else {
+      fits=list(lmer(readout ~ severe + (1|donor), data=dat.list[[gene]][[d]]))
+      tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
+      out=tab[2,]
+      
+      warn_flag=F
+      
+      # singularity
+      if (isSingular(fits[[1]], tol = 1e-4)) {
+        warn_flag <- TRUE
+      }
+    
+      # convergence warnings stored in optinfo
+      msgs <- fits[[1]]@optinfo$conv$lme4$messages
+      if (!is.null(msgs)) {
+        warn_flag <- TRUE
+      }
+      
+      if (warn_flag) {
+        out = paste0(out, "W")
+      }
+      
+      out
+    }
+  })
+  names(res)=rownames
+  sapply(rownames, function(d) len(unique(dat.list[[d]]$readout))==1) -> all_same
+  res[all_same] = "all values identical"
+  res
+}) -> tab
+
+  
+  
+
+kable(tab, align="c", caption="Linear mixed models. ")%>%  
+  kable_styling(latex_options = "hold_position") %>% 
+  column_spec(1, width = "1.1cm") %>%  
+  column_spec(2:(1+ncol(tab)), width = "3cm")%>%  
+  row_spec(0, bold = TRUE, align = "c")%>%
+  row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
+
+
+# now do it with unpaired t test
+mysapply(genes, function (gene) {
+  res = sapply(rownames, function(d) {
+    if (len(unique(dat.list[[gene]][[d]]$readout))==1) {
+      return(NA)
+    } else {
+      dat.tmp = dat.list[[gene]][[d]] %>%
+        group_by(donor, severe) %>%
+        summarize(readout=mean(readout), .groups="drop")
+      formatPvalues(t.test(readout~severe, data=dat.tmp)$p.val) 
+    }
+  })
+  names(res)=rownames
+  sapply(rownames, function(d) len(unique(dat.list[[gene]][[d]]$readout))==1) -> all_same
+  res[all_same] = "all values identical"
+  res
+}) -> tab
+
+
+kable(tab, align="c", caption="Unpaired t test pvals. ")%>%  
+  kable_styling(latex_options = "hold_position") %>% 
+  column_spec(1, width = "1.1cm") %>%  
+  column_spec(2:(1+ncol(tab)), width = "3cm")%>%  
+  row_spec(0, bold = TRUE, align = "c")%>%
+  row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
+
+```
+
+
+
+
+# HSV2-186
+
+Data is not transformed as it is percentage.
+
+```{r, echo=F, message=T, results='asis'}
+dat1=suppressMessages(
+  readxl::read_xlsx("data/2026-7-21_PLOS-Review-Data_HSV2-186 1.xlsx", sheet=glue("HSV2-186"))
+)
+
+doOneRow=function (x) {
+  data.frame(donor=as.character(rep(c(1:8), each=3)), readout=(as.numeric(unlist(x[-(1)]))), severe=rep(c(0,1), each=12))
+}
+
+rownames=c("3.7U", "11.1U", "33.3U", "100U")
+
+genes=c("HSV2-186"); names(genes)=genes
+rows=c("HSV2-186"=list(5:8))
+
+lapply(genes, function (gene) {
+  res=lapply(rows[[gene]], function (i) doOneRow(dat1[i-1,]))
+  names(res)=rownames
+  res
+}) -> dat.list
+
+
+
+mysapply(genes, function (gene) {
+  
+  res = sapply(rownames, function(d) {
+    if (len(unique(dat.list[[gene]][[d]]$readout))==1) {
+      return(NA)
+    } else {
+      fits=list(lmer(readout ~ severe + (1|donor), data=dat.list[[gene]][[d]]))
+      tab=getFormattedSummary(fits, robust=F, p.digits=3, trunc.large.est = F)
+      out=tab[2,]
+      
+      warn_flag=F
+      
+      # singularity
+      if (isSingular(fits[[1]], tol = 1e-4)) {
+        warn_flag <- TRUE
+      }
+    
+      # convergence warnings stored in optinfo
+      msgs <- fits[[1]]@optinfo$conv$lme4$messages
+      if (!is.null(msgs)) {
+        warn_flag <- TRUE
+      }
+      
+      if (warn_flag) {
+        out = paste0(out, "W")
+      }
+      
+      out
+    }
+  })
+  names(res)=rownames
+  sapply(rownames, function(d) len(unique(dat.list[[d]]$readout))==1) -> all_same
+  res[all_same] = "all values identical"
+  res
+}) -> tab
+
+  
+  
+
+kable(tab, align="c", caption="Linear mixed models. ")%>%  
+  kable_styling(latex_options = "hold_position") %>% 
+  column_spec(1, width = "1.1cm") %>%  
+  column_spec(2:(1+ncol(tab)), width = "3cm")%>%  
+  row_spec(0, bold = TRUE, align = "c")%>%
+  row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
+
+
+# now do it with unpaired t test
+mysapply(genes, function (gene) {
+  res = sapply(rownames, function(d) {
+    if (len(unique(dat.list[[gene]][[d]]$readout))==1) {
+      return(NA)
+    } else {
+      dat.tmp = dat.list[[gene]][[d]] %>%
+        group_by(donor, severe) %>%
+        summarize(readout=mean(readout), .groups="drop")
+      formatPvalues(t.test(readout~severe, data=dat.tmp)$p.val) 
+    }
+  })
+  names(res)=rownames
+  sapply(rownames, function(d) len(unique(dat.list[[gene]][[d]]$readout))==1) -> all_same
+  res[all_same] = "all values identical"
+  res
+}) -> tab
+
+
+kable(tab, align="c", caption="Unpaired t test pvals. ")%>%  
+  kable_styling(latex_options = "hold_position") %>% 
+  column_spec(1, width = "1.1cm") %>%  
+  column_spec(2:(1+ncol(tab)), width = "3cm")%>%  
+  row_spec(0, bold = TRUE, align = "c")%>%
+  row_spec(1:nrow(tab), extra_latex_after = "\\addlinespace[6pt]")
+
+```
