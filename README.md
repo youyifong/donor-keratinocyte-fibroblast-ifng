@@ -2,6 +2,8 @@
 
 ## Reproducibility
 
+The following table shows the mapping between manuscript figures and report figures.
+
 | Manuscript | analysis_20250204.pdf |
 |---|---|
 | Fig 1 data, but stats not reported.<br>Fibroblast data not in this figure. | Figure 5A |
@@ -17,7 +19,7 @@
 | Fig 6H (Table 27/28) | Cellprofiler data analysis |
 | Fig 5C (Table 29/30) | Updated Luminex Data |
 
-analysis_20250204.pdf was generated with the following command:
+The report analysis_20250204.pdf was generated with the following command:
 ```{shell}
 Rscript -e "rmarkdown::render('analysis.Rmd', output_file='reports/analysis_$(date +%Y%m%d).pdf')"
 ```
