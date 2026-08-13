@@ -292,7 +292,8 @@ Data is not transformed as it is percentage.
 
 ```{r, echo=F, message=T, results='asis'}
 dat1=suppressMessages(
-  readxl::read_xlsx("data/2026-7-21_PLOS-Review-Data_HSV2-186 1.xlsx", sheet=glue("HSV2-186"))
+  readxl::read_xlsx("data/2026-8-10_PLOS-Review-Data_HSV2-186.xlsx", sheet=glue("HSV2-186"))
+  # readxl::read_xlsx("data/2026-7-21_PLOS-Review-Data_HSV2-186 1.xlsx", sheet=glue("HSV2-186"))
 )
 
 doOneRow=function (x) {
