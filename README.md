@@ -2,6 +2,9 @@
 
 Multiple statistical models were completed for most data sets, including linear mixed models and student t test (paired or unpaired). Generally, linear mixed models were reported in the manuscript. In the case of Figure 6 the linear mixed model had low confidence due to limited replicates. In this case the student t test is reported in the manuscript. 
 
+data/Zimenko_2026_PLOS-Pathogens_RawData` is the final compendium of all raw data and associated statistical analysis results, organized for clarity.
+
+
 ## Reproducibility
 
 The following table shows the mapping between manuscript figures and report figures.
